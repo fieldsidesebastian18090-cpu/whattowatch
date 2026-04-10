@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatToWatch - 流媒体智能推荐</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: { DEFAULT: '#0f0f0f', card: '#1a1a2e', hover: '#252545' },
+            accent: '#e50914',
+            gold: '#f5c518',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f0f0f; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .platform-btn { transition: all 0.2s ease; }
+    .platform-btn.active { box-shadow: 0 0 0 2px #e50914; }
+    .match-ring {
+      background: conic-gradient(#e50914 calc(var(--pct) * 1%), #333 0);
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body class="bg-bg text-gray-200 min-h-screen">
+<div id="app" class="max-w-6xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <header class="text-center mb-10">
+    <h1 class="text-4xl font-bold mb-2">
+      <span class="text-accent">What</span>To<span class="text-gold">Watch</span>
+    </h1>
+    <p class="text-gray-400">从豆瓣到流媒体 — 找到最适合你的电影</p>
+  </header>
+
+  <!-- Step 1: Douban Sync -->
+  <section class="bg-bg-card rounded-xl p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+      <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">1</span>
+      同步豆瓣数据
+    </h2>
+    <div class="flex gap-3">
+      <input
+        v-model="doubanId"
+        @keyup.enter="startSync"
+        type="text"
+        placeholder="输入豆瓣用户ID（如 username 或数字ID）"
+        class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-accent"
+      />
+      <button
+        @click="startSync"
+        :disabled="syncing || !doubanId.trim()"
+        class="bg-accent hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+      >
+        {{ syncing ? '同步中...' : '同步' }}
+      </button>
+    </div>
+
+    <!-- Progress -->
+    <div v-if="syncing || syncPhase === 'done'" class="mt-4">
+      <div class="flex justify-between text-sm text-gray-400 mb-1">
+        <span>{{ syncStatusText }}</span>
+        <span v-if="syncProgress.total_items">共 {{ syncProgress.total_items }} 部</span>
+      </div>
+      <div class="w-full bg-gray-700 rounded-full h-2">
+        <div
+          class="h-2 rounded-full transition-all duration-300"
+          :class="syncPhase === 'done' ? 'bg-green-500' : 'bg-accent'"
+          :style="{ width: progressPct + '%' }"
+        ></div>
+      </div>
+    </div>
+
+    <!-- Profile Summary -->
+    <div v-if="profile" class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="bg-gray-800/50 rounded-lg p-4">
+        <div class="text-sm text-gray-400 mb-2">看过 / 想看</div>
+        <div class="text-2xl font-bold">{{ profile.watched_count }} <span class="text-gray-500">/</span> {{ profile.wish_count }}</div>
+      </div>
+      <div class="bg-gray-800/50 rounded-lg p-4">
+        <div class="text-sm text-gray-400 mb-2">偏好类型</div>
+        <div class="flex flex-wrap gap-1">
+          <span v-for="g in profile.top_genres" :key="g.name" class="bg-accent/20 text-accent text-xs px-2 py-1 rounded">{{ g.name }}</span>
+        </div>
+      </div>
+      <div class="bg-gray-800/50 rounded-lg p-4">
+        <div class="text-sm text-gray-400 mb-2">偏好导演</div>
+        <div class="flex flex-wrap gap-1">
+          <span v-for="d in profile.top_directors" :key="d.name" class="bg-gold/20 text-gold text-xs px-2 py-1 rounded">{{ d.name }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div v-if="syncError" class="mt-3 text-red-400 text-sm">{{ syncError }}</div>
+  </section>
+
+  <!-- Step 2: Platform Selection -->
+  <section v-if="profile" class="bg-bg-card rounded-xl p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+      <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">2</span>
+      选择你的会员
+    </h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <button
+        v-for="p in platforms"
+        :key="p.key"
+        @click="togglePlatform(p.key)"
+        :class="['platform-btn flex flex-col items-center gap-2 p-4 rounded-xl border transition-all cursor-pointer',
+                  selectedPlatforms.includes(p.key)
+                    ? 'active border-accent bg-accent/10 text-white'
+                    : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-500']"
+      >
+        <span class="text-2xl">{{ platformIcons[p.key] }}</span>
+        <span class="text-sm font-medium">{{ p.name }}</span>
+        <span class="text-xs" :class="p.region === 'CN' ? 'text-green-400' : 'text-blue-400'">{{ p.region === 'CN' ? '国内' : '海外' }}</span>
+      </button>
+    </div>
+    <div class="mt-4 flex justify-end">
+      <button
+        @click="getRecommendations"
+        :disabled="!selectedPlatforms.length || loadingRecs"
+        class="bg-accent hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-8 py-3 rounded-lg transition-colors"
+      >
+        {{ loadingRecs ? '正在推荐...' : '为我推荐' }}
+      </button>
+    </div>
+  </section>
+
+  <!-- Step 3: Recommendations -->
+  <section v-if="recommendations.length" class="mb-10">
+    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+      <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">3</span>
+      为你推荐
+      <span class="text-gray-500 text-sm font-normal ml-2">共 {{ recommendations.length }} 部</span>
+    </h2>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div
+        v-for="(item, idx) in recommendations"
+        :key="item.movie_id"
+        class="bg-bg-card rounded-xl overflow-hidden hover:bg-bg-hover transition-colors group"
+      >
+        <!-- Poster -->
+        <div class="relative aspect-[2/3] bg-gray-800">
+          <img
+            v-if="item.poster_url"
+            :src="item.poster_url"
+            :alt="item.title"
+            class="w-full h-full object-cover"
+            loading="lazy"
+          />
+          <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
+
+          <!-- Match badge -->
+          <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
+               :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">
+            {{ item.match_pct }}% 匹配
+          </div>
+
+          <!-- Source tag -->
+          <div v-if="item.source === '来自想看清单'" class="absolute top-2 left-2 bg-gold/90 text-black text-xs font-bold px-2 py-1 rounded">
+            想看
+          </div>
+
+          <!-- Rank -->
+          <div v-if="idx < 3" class="absolute bottom-2 left-2 text-5xl font-black text-white/20 leading-none">
+            {{ idx + 1 }}
+          </div>
+        </div>
+
+        <!-- Info -->
+        <div class="p-3">
+          <h3 class="font-semibold text-sm truncate mb-1" :title="item.title">{{ item.title }}</h3>
+          <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
+            <span v-if="item.year">{{ item.year }}</span>
+            <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
+          </div>
+          <!-- Genres -->
+          <div class="flex flex-wrap gap-1 mb-2">
+            <span v-for="g in item.genres.slice(0, 2)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
+          </div>
+          <!-- Platforms -->
+          <div class="flex gap-1">
+            <span v-for="pl in item.platforms" :key="pl.name" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">
+              {{ pl.name }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Empty state -->
+  <div v-if="recsLoaded && !recommendations.length" class="text-center py-16 text-gray-500">
+    <p class="text-xl mb-2">没有找到推荐内容</p>
+    <p class="text-sm">试试选择更多平台，或者确认 TMDB API Key 已配置</p>
+  </div>
+
+  <!-- Footer -->
+  <footer class="text-center text-gray-600 text-xs py-8">
+    WhatToWatch MVP &mdash; 数据来源: 豆瓣 / TMDB
+  </footer>
+
+</div>
+
+<script>
+const { createApp, ref, computed } = Vue
+
+createApp({
+  setup() {
+    const doubanId = ref('')
+    const syncing = ref(false)
+    const syncPhase = ref('idle')
+    const syncProgress = ref({ current_page: 0, total_pages: 0, total_items: 0 })
+    const syncError = ref('')
+    const profile = ref(null)
+    const platforms = ref([])
+    const selectedPlatforms = ref([])
+    const recommendations = ref([])
+    const loadingRecs = ref(false)
+    const recsLoaded = ref(false)
+
+    const platformIcons = {
+      tencent: '📺', iqiyi: '🎬', youku: '🎥', mango: '🥭',
+      netflix: '🔴', disney: '🏰', max: '🟣'
+    }
+
+    const syncStatusText = computed(() => {
+      const p = syncPhase.value
+      if (p === 'syncing_watched') return '正在同步「看过」列表...'
+      if (p === 'syncing_wish') return '正在同步「想看」列表...'
+      if (p === 'done') return '同步完成！'
+      if (p === 'error') return '同步出错'
+      return '准备中...'
+    })
+
+    const progressPct = computed(() => {
+      if (syncPhase.value === 'done') return 100
+      const t = syncProgress.value.total_pages
+      const c = syncProgress.value.current_page
+      return t > 0 ? Math.round((c / t) * 100) : 10
+    })
+
+    let pollTimer = null
+
+    async function startSync() {
+      const id = doubanId.value.trim().replace(/\/$/, '').split('/').pop()
+      if (!id) return
+
+      doubanId.value = id
+      syncing.value = true
+      syncError.value = ''
+      syncPhase.value = 'idle'
+      profile.value = null
+      recommendations.value = []
+      recsLoaded.value = false
+
+      try {
+        await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ douban_id: id })
+        })
+
+        pollTimer = setInterval(async () => {
+          const resp = await fetch(`/api/sync/status/${id}`)
+          const data = await resp.json()
+          syncPhase.value = data.phase
+          syncProgress.value = data
+
+          if (data.phase === 'done') {
+            clearInterval(pollTimer)
+            syncing.value = false
+            await loadProfile(id)
+            await loadPlatforms()
+          } else if (data.phase === 'error') {
+            clearInterval(pollTimer)
+            syncing.value = false
+            syncError.value = data.error || '同步过程中出现错误'
+          }
+        }, 2000)
+      } catch (e) {
+        syncing.value = false
+        syncError.value = '网络错误: ' + e.message
+      }
+    }
+
+    async function loadProfile(id) {
+      const resp = await fetch(`/api/profile/${id}`)
+      const data = await resp.json()
+      if (!data.error) profile.value = data
+    }
+
+    async function loadPlatforms() {
+      const resp = await fetch('/api/platforms')
+      platforms.value = await resp.json()
+    }
+
+    function togglePlatform(key) {
+      const idx = selectedPlatforms.value.indexOf(key)
+      if (idx >= 0) selectedPlatforms.value.splice(idx, 1)
+      else selectedPlatforms.value.push(key)
+    }
+
+    async function getRecommendations() {
+      if (!selectedPlatforms.value.length) return
+      loadingRecs.value = true
+      recsLoaded.value = false
+
+      try {
+        const params = new URLSearchParams({
+          platforms: selectedPlatforms.value.join(','),
+          limit: '30'
+        })
+        const resp = await fetch(`/api/recommend/${doubanId.value}?${params}`)
+        const data = await resp.json()
+        recommendations.value = data.items || []
+        recsLoaded.value = true
+      } catch (e) {
+        console.error(e)
+      } finally {
+        loadingRecs.value = false
+      }
+    }
+
+    return {
+      doubanId, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
+      profile, platforms, selectedPlatforms, platformIcons,
+      recommendations, loadingRecs, recsLoaded,
+      startSync, togglePlatform, getRecommendations
+    }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>
