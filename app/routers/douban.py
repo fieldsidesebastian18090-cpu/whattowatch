@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import Movie, User, UserMovie, get_db
+from ..database import Movie, MovieProvider, User, UserMovie, get_db
 from ..services import douban_scraper
 
 router = APIRouter(prefix="/api", tags=["douban"])
@@ -116,6 +116,25 @@ async def _do_sync(douban_id: str):
                         # Update media_type if detected from detail page
                         if detail.media_type and movie.media_type != "book":
                             movie.media_type = detail.media_type
+
+                        # Save streaming platforms from Douban
+                        if detail.platforms:
+                            from ..config import PROVIDERS
+                            for pkey in detail.platforms:
+                                pinfo = PROVIDERS.get(pkey)
+                                if not pinfo:
+                                    continue
+                                exists = db.query(MovieProvider).filter(
+                                    MovieProvider.movie_id == movie.id,
+                                    MovieProvider.provider_key == pkey,
+                                ).first()
+                                if not exists:
+                                    db.add(MovieProvider(
+                                        movie_id=movie.id,
+                                        provider_key=pkey,
+                                        provider_name=pinfo["name"],
+                                        updated_at=datetime.utcnow(),
+                                    ))
 
                     movie.enriched = 1
                     progress.enriched_count += 1

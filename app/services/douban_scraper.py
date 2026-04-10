@@ -34,6 +34,7 @@ class MovieDetail:
     actors: list[str] | None = None
     poster_url: str | None = None
     media_type: str | None = None  # detected from detail page
+    platforms: list[str] | None = None  # streaming platforms from Douban
 
 
 @dataclass
@@ -182,6 +183,53 @@ def parse_movie_detail(html: str) -> MovieDetail:
         detail.media_type = "tv"
     else:
         detail.media_type = "movie"
+
+    # Extract streaming platforms from the page
+    # Douban shows vendor/platform info in various places
+    page_text = soup.get_text()
+    platform_map = {
+        "腾讯视频": "tencent",
+        "爱奇艺": "iqiyi",
+        "优酷": "youku",
+        "芒果TV": "mango",
+        "芒果tv": "mango",
+        "Netflix": "netflix",
+        "netflix": "netflix",
+        "Disney+": "disney",
+        "Disney Plus": "disney",
+        "Max": "max",
+        "HBO": "max",
+        "bilibili": "bilibili",
+        "哔哩哔哩": "bilibili",
+    }
+    found_platforms = []
+    # Search in vendor links and play buttons
+    for vendor_el in soup.select("a[href*='www.iq.com'], a[href*='v.qq.com'], a[href*='youku.com'], a[href*='mgtv.com'], a[href*='netflix.com'], a[href*='disneyplus.com'], a[href*='bilibili.com'], a[href*='iqiyi.com']"):
+        href = vendor_el.get("href", "")
+        if "v.qq.com" in href or "film.qq.com" in href:
+            found_platforms.append("tencent")
+        elif "iqiyi.com" in href or "iq.com" in href:
+            found_platforms.append("iqiyi")
+        elif "youku.com" in href:
+            found_platforms.append("youku")
+        elif "mgtv.com" in href:
+            found_platforms.append("mango")
+        elif "netflix.com" in href:
+            found_platforms.append("netflix")
+        elif "disneyplus.com" in href or "disney" in href:
+            found_platforms.append("disney")
+        elif "bilibili.com" in href:
+            found_platforms.append("bilibili")
+
+    # Also check text content for platform names in vendor sections
+    vendor_sections = soup.select(".vendors, .gray_ad, #dale_movie_subject_vendors, .playBtn, [class*=vendor], [class*=play]")
+    for section in vendor_sections:
+        text = section.get_text()
+        for name, key in platform_map.items():
+            if name in text and key not in found_platforms:
+                found_platforms.append(key)
+
+    detail.platforms = list(set(found_platforms)) if found_platforms else None
 
     return detail
 

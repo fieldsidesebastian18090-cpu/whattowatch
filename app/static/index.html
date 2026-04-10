@@ -119,7 +119,7 @@
     <div class="mt-4 flex justify-end">
       <button @click="getRecommendations" :disabled="loadingRecs"
         class="bg-accent hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-8 py-3 rounded-lg transition-colors">
-        {{ loadingRecs ? '加载中...' : '查看想看清单' }}
+        {{ loadingRecs ? '加载中...' : (selectedPlatforms.length ? '筛选想看清单' : '查看全部想看') }}
       </button>
     </div>
   </section>
@@ -140,7 +140,7 @@
       <div v-if="movieWish.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <div v-for="item in movieWish" :key="'m'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
-            <img v-if="item.poster_url" :src="imgProxy(item.poster_url)" class="w-full h-full object-cover" loading="lazy" />
+            <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
             <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
             <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
               :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
@@ -152,18 +152,24 @@
               <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
             </div>
             <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
-            <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
+            <div class="flex flex-wrap gap-1 mb-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
+            <div v-if="item.available_on && item.available_on.length" class="flex flex-wrap gap-1">
+              <span v-for="p in item.available_on" :key="p.key" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">{{ p.name }}</span>
+            </div>
           </div>
         </div>
       </div>
-      <div v-else class="text-center py-12 text-gray-500">暂无想看电影</div>
+      <div v-else class="text-center py-12 text-gray-500">
+        <p>暂无想看电影</p>
+        <p v-if="selectedPlatforms.length" class="text-xs mt-1">你选的平台暂无匹配，试试不选平台查看全部</p>
+      </div>
     </div>
     <!-- TV list -->
     <div v-show="activeTab === 'tv'">
       <div v-if="tvWish.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <div v-for="item in tvWish" :key="'t'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
-            <img v-if="item.poster_url" :src="imgProxy(item.poster_url)" class="w-full h-full object-cover" loading="lazy" />
+            <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
             <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
             <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
               :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
@@ -175,11 +181,17 @@
               <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
             </div>
             <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
-            <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
+            <div class="flex flex-wrap gap-1 mb-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
+            <div v-if="item.available_on && item.available_on.length" class="flex flex-wrap gap-1">
+              <span v-for="p in item.available_on" :key="p.key" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">{{ p.name }}</span>
+            </div>
           </div>
         </div>
       </div>
-      <div v-else class="text-center py-12 text-gray-500">暂无想看剧集</div>
+      <div v-else class="text-center py-12 text-gray-500">
+        <p>暂无想看剧集</p>
+        <p v-if="selectedPlatforms.length" class="text-xs mt-1">你选的平台暂无匹配，试试不选平台查看全部</p>
+      </div>
     </div>
   </section>
 
@@ -189,7 +201,7 @@
     <div class="bg-bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
       <div class="flex flex-col sm:flex-row gap-6 p-6">
         <div class="sm:w-48 flex-shrink-0">
-          <img v-if="detailMovie.poster_url" :src="imgProxy(detailMovie.poster_url)" class="w-full rounded-lg shadow-lg" />
+          <img v-if="detailMovie.poster_url" :src="detailMovie.poster_url" class="w-full rounded-lg shadow-lg" />
           <div v-else class="w-full aspect-[2/3] bg-gray-800 rounded-lg flex items-center justify-center text-gray-600 text-6xl">?</div>
         </div>
         <div class="flex-1 min-w-0">
