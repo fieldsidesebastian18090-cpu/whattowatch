@@ -77,6 +77,7 @@ def _headers() -> dict[str, str]:
     }
     if _douban_cookie:
         h["Cookie"] = _douban_cookie
+        print(f"[HEADERS] Cookie attached, length={len(_douban_cookie)}")
     return h
 
 

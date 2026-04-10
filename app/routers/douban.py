@@ -22,32 +22,28 @@ class SyncResponse(BaseModel):
 
 
 async def _do_sync(douban_id: str):
-    """Background task: scrape movies, TV, books + enrich from detail pages."""
+    """Background task: scrape + enrich. Always re-enriches failed items."""
     from ..database import SessionLocal
 
     import asyncio
     import random
     import httpx
 
-    # Step 1: Scrape movie+TV lists only
-    all_items = await douban_scraper.sync_douban_user(douban_id)
-
-    if not all_items:
-        progress = douban_scraper.get_progress(douban_id)
-        if progress.phase != "error":
-            progress.phase = "done"
-        return
-
     db = SessionLocal()
     try:
+        # Ensure user exists
         user = db.query(User).filter(User.douban_id == douban_id).first()
         if not user:
             user = User(douban_id=douban_id)
             db.add(user)
             db.flush()
+            db.commit()
 
-        # Step 2: Save items
-        for dm in all_items:
+        # Step 1: Scrape lists (skip if data already exists and no new items)
+        all_items = await douban_scraper.sync_douban_user(douban_id)
+
+        # Step 2: Save new items
+        for dm in (all_items or []):
             movie = db.query(Movie).filter(Movie.douban_id == dm.douban_id).first()
             if not movie:
                 movie = Movie(
@@ -78,18 +74,23 @@ async def _do_sync(douban_id: str):
 
         db.commit()
 
-        # Step 3: Enrich items without detail data or platform data
-        items_to_enrich = (
+        # Step 3: Reset failed enrichments (no poster = was blocked)
+        reset_count = (
             db.query(Movie)
-            .outerjoin(MovieProvider)
-            .filter((Movie.enriched == 0) | (MovieProvider.id.is_(None)))
-            .all()
+            .filter(Movie.enriched == 1, Movie.poster_url.is_(None))
+            .update({"enriched": 0})
         )
+        db.commit()
+        print(f"[SYNC] Reset {reset_count} failed enrichments")
+
+        # Step 4: Enrich all unenriched
+        items_to_enrich = db.query(Movie).filter(Movie.enriched == 0).all()
 
         progress = douban_scraper.get_progress(douban_id)
         progress.phase = "enriching"
         progress.enrich_total = len(items_to_enrich)
         progress.enriched_count = 0
+        print(f"[SYNC] Enriching {len(items_to_enrich)} items")
 
         sem = asyncio.Semaphore(5)
 
@@ -118,11 +119,10 @@ async def _do_sync(douban_id: str):
                             movie.actors = json.dumps(detail.actors, ensure_ascii=False)
                         if detail.poster_url:
                             movie.poster_url = detail.poster_url
-                        # Update media_type if detected from detail page
-                        if detail.media_type and movie.media_type != "book":
+                        if detail.media_type:
                             movie.media_type = detail.media_type
 
-                        # Save streaming platforms from Douban
+                        # Save streaming platforms
                         if detail.platforms:
                             from ..config import PROVIDERS
                             for pkey in detail.platforms:
@@ -158,10 +158,9 @@ async def _do_sync(douban_id: str):
 
 @router.post("/sync", response_model=SyncResponse)
 async def sync_douban(req: SyncRequest, background_tasks: BackgroundTasks):
-    """Start syncing a Douban user's movie, TV, and book data."""
     douban_id = req.douban_id.strip().strip("/").split("/")[-1]
     if req.cookie:
-        douban_scraper.set_cookie(req.cookie)
+        douban_scraper.set_cookie(req.cookie.strip())
     background_tasks.add_task(_do_sync, douban_id)
     return SyncResponse(message="同步已开始", douban_id=douban_id)
 
@@ -190,7 +189,6 @@ async def user_profile(douban_id: str, db: Session = Depends(get_db)):
 
     profile = build_user_profile(db, user.id)
 
-    # Counts by media type
     def _count(status, media_type=None):
         q = db.query(UserMovie).join(Movie).filter(UserMovie.user_id == user.id, UserMovie.status == status)
         if media_type:
