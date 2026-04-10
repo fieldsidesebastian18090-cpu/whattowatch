@@ -359,15 +359,16 @@ BOOK_SUBJECT = "https://book.douban.com/subject"
 
 
 def _parse_book_list_page(html: str, status: str) -> list[DoubanMovie]:
-    """Parse a Douban book list page."""
+    """Parse a Douban book list page (mode=list)."""
     soup = BeautifulSoup(html, "html.parser")
-    items = soup.select(".subject-item")
+    items = soup.select("li.item")
     books: list[DoubanMovie] = []
 
     for item in items:
         book = DoubanMovie(status=status, media_type="book")
 
-        link = item.select_one("h2 a")
+        # Title and ID from .title a
+        link = item.select_one(".title a")
         if link and link.get("href"):
             href = link["href"]
             match = re.search(r"/subject/(\d+)/", href)
@@ -375,22 +376,24 @@ def _parse_book_list_page(html: str, status: str) -> list[DoubanMovie]:
                 book.douban_id = match.group(1)
             book.title = link.get_text(strip=True)
 
-        # Year from pub info
-        pub = item.select_one(".pub")
-        if pub:
-            text = pub.get_text(strip=True)
+        # Year from .intro text
+        intro = item.select_one(".intro")
+        if intro:
+            text = intro.get_text(strip=True)
             year_match = re.search(r"(\d{4})", text)
             if year_match:
                 book.year = int(year_match.group(1))
 
-        # User rating
-        rating_tag = item.select_one('[class*="rating"]')
-        if rating_tag:
-            for cls in rating_tag.get("class", []):
-                star_match = re.search(r"rating(\d)-t", cls)
-                if star_match:
-                    book.user_rating = int(star_match.group(1))
-                    break
+        # User rating from .date span
+        date_div = item.select_one(".date")
+        if date_div:
+            rating_tag = date_div.select_one('[class*="rating"]')
+            if rating_tag:
+                for cls in rating_tag.get("class", []):
+                    star_match = re.search(r"rating(\d)-t", cls)
+                    if star_match:
+                        book.user_rating = int(star_match.group(1))
+                        break
 
         if book.douban_id:
             books.append(book)
@@ -401,13 +404,13 @@ def _parse_book_list_page(html: str, status: str) -> list[DoubanMovie]:
 def _get_book_total_count(html: str) -> int:
     """Extract total count from book list page."""
     soup = BeautifulSoup(html, "html.parser")
-    for selector in [".article h2", "#db-book-mine h2", "h2"]:
+    for selector in ["#db-book-mine h2", ".article h2", "h2"]:
         tag = soup.select_one(selector)
         if tag:
             match = re.search(r"(\d+)", tag.get_text())
             if match:
                 return int(match.group(1))
-    items = soup.select(".subject-item")
+    items = soup.select("li.item")
     return len(items)
 
 
