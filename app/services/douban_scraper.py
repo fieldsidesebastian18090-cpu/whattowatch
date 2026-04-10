@@ -1,7 +1,7 @@
 import asyncio
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,6 +13,7 @@ USER_AGENTS = [
 ]
 
 DOUBAN_BASE = "https://movie.douban.com/people"
+DOUBAN_SUBJECT = "https://movie.douban.com/subject"
 
 
 @dataclass
@@ -25,11 +26,22 @@ class DoubanMovie:
 
 
 @dataclass
+class MovieDetail:
+    douban_rating: float | None = None
+    genres: list[str] | None = None
+    directors: list[str] | None = None
+    actors: list[str] | None = None
+    poster_url: str | None = None
+
+
+@dataclass
 class SyncProgress:
     total_pages: int = 0
     current_page: int = 0
     total_items: int = 0
-    phase: str = "idle"  # idle, syncing_watched, syncing_wish, done, error
+    enriched_count: int = 0
+    enrich_total: int = 0
+    phase: str = "idle"  # idle, syncing_watched, syncing_wish, enriching, done, error
     error: str = ""
 
 
@@ -94,29 +106,70 @@ def _parse_list_page(html: str, status: str) -> list[DoubanMovie]:
 def _get_total_count(html: str) -> int:
     """Extract total item count from the page."""
     soup = BeautifulSoup(html, "html.parser")
-    # Try to find the count in the page title or content
     count_tag = soup.select_one("#db-movie-mine h2")
     if count_tag:
         match = re.search(r"(\d+)", count_tag.get_text())
         if match:
             return int(match.group(1))
-    # Fallback: look at paginator
     paginator = soup.select_one(".paginator .thispage")
     if paginator and paginator.get("data-total-page"):
         return int(paginator["data-total-page"]) * 15
     return 0
 
 
+def parse_movie_detail(html: str) -> MovieDetail:
+    """Parse a Douban movie detail page for metadata."""
+    soup = BeautifulSoup(html, "html.parser")
+    detail = MovieDetail()
+
+    # Rating
+    rating_tag = soup.select_one("strong.rating_num, strong[property='v:average']")
+    if rating_tag:
+        try:
+            detail.douban_rating = float(rating_tag.get_text(strip=True))
+        except ValueError:
+            pass
+
+    # Genres
+    genre_tags = soup.select("span[property='v:genre']")
+    if genre_tags:
+        detail.genres = [g.get_text(strip=True) for g in genre_tags]
+
+    # Directors
+    director_tags = soup.select("a[rel='v:directedBy']")
+    if director_tags:
+        detail.directors = [d.get_text(strip=True) for d in director_tags]
+
+    # Actors
+    actor_tags = soup.select("a[rel='v:starring']")
+    if actor_tags:
+        detail.actors = [a.get_text(strip=True) for a in actor_tags[:10]]
+
+    # Poster
+    poster_tag = soup.select_one("#mainpic img")
+    if poster_tag and poster_tag.get("src"):
+        detail.poster_url = poster_tag["src"]
+
+    return detail
+
+
+async def fetch_movie_detail(
+    client: httpx.AsyncClient, douban_id: str
+) -> MovieDetail | None:
+    """Fetch and parse a single movie's detail page."""
+    url = f"{DOUBAN_SUBJECT}/{douban_id}/"
+    try:
+        resp = await client.get(url, headers=_headers())
+        resp.raise_for_status()
+        return parse_movie_detail(resp.text)
+    except httpx.HTTPError:
+        return None
+
+
 async def scrape_user_movies(
     douban_id: str, status: str, max_pages: int = 20
 ) -> list[DoubanMovie]:
-    """Scrape a user's watched or wish list from Douban.
-
-    Args:
-        douban_id: Douban user ID or custom domain
-        status: "watched" or "wish"
-        max_pages: Maximum pages to scrape (safety limit)
-    """
+    """Scrape a user's watched or wish list from Douban."""
     path = "collect" if status == "watched" else "wish"
     url_base = f"{DOUBAN_BASE}/{douban_id}/{path}"
     all_movies: list[DoubanMovie] = []
@@ -140,7 +193,6 @@ async def scrape_user_movies(
 
             html = resp.text
 
-            # Get total count on first page
             if page == 0:
                 total = _get_total_count(html)
                 progress.total_pages = (total + 14) // 15 if total else 1
@@ -153,7 +205,6 @@ async def scrape_user_movies(
             all_movies.extend(movies)
             progress.current_page = page + 1
 
-            # Random delay between requests
             await asyncio.sleep(random.uniform(2.0, 4.0))
 
     return all_movies

@@ -207,12 +207,12 @@
   <!-- Empty state -->
   <div v-if="recsLoaded && !recommendations.length" class="text-center py-16 text-gray-500">
     <p class="text-xl mb-2">没有找到推荐内容</p>
-    <p class="text-sm">试试选择更多平台，或者确认 TMDB API Key 已配置</p>
+    <p class="text-sm">试试选择更多平台，或等待同步完成后重试</p>
   </div>
 
   <!-- Footer -->
   <footer class="text-center text-gray-600 text-xs py-8">
-    WhatToWatch MVP &mdash; 数据来源: 豆瓣 / TMDB
+    WhatToWatch MVP &mdash; 数据来源: 豆瓣
   </footer>
 
 </div>
@@ -236,13 +236,14 @@ createApp({
 
     const platformIcons = {
       tencent: '📺', iqiyi: '🎬', youku: '🎥', mango: '🥭',
-      netflix: '🔴', disney: '🏰', max: '🟣'
+      netflix: '🔴', disney: '🏰', max: '🟣',
     }
 
     const syncStatusText = computed(() => {
       const p = syncPhase.value
       if (p === 'syncing_watched') return '正在同步「看过」列表...'
       if (p === 'syncing_wish') return '正在同步「想看」列表...'
+      if (p === 'enriching') return `正在获取电影详情 (${syncProgress.value.enriched_count}/${syncProgress.value.enrich_total})...`
       if (p === 'done') return '同步完成！'
       if (p === 'error') return '同步出错'
       return '准备中...'

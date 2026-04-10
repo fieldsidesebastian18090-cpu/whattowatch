@@ -34,8 +34,8 @@ class Movie(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     douban_id = Column(Text, unique=True, nullable=False)
-    tmdb_id = Column(Integer, nullable=True)
     title = Column(Text, nullable=False)
+    enriched = Column(Integer, default=0)  # 0=pending, 1=done
     year = Column(Integer, nullable=True)
     douban_rating = Column(Float, nullable=True)
     genres = Column(Text, default="[]")  # JSON array
@@ -64,13 +64,13 @@ class UserMovie(Base):
 class MovieProvider(Base):
     __tablename__ = "movie_providers"
     __table_args__ = (
-        UniqueConstraint("movie_id", "provider_id", name="uq_movie_provider"),
+        UniqueConstraint("movie_id", "provider_key", name="uq_movie_provider"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     movie_id = Column(Integer, ForeignKey("movies.id"), nullable=False)
+    provider_key = Column(Text, nullable=False)  # e.g. "netflix", "tencent"
     provider_name = Column(Text, nullable=False)
-    provider_id = Column(Integer, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
     movie = relationship("Movie", back_populates="providers")

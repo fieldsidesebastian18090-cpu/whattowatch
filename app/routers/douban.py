@@ -1,4 +1,3 @@
-import asyncio
 import json
 from datetime import datetime
 
@@ -7,7 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import Movie, MovieProvider, User, UserMovie, get_db
-from ..services import douban_scraper, tmdb_client
+from ..services import douban_scraper
+from ..services.platform_search import search_platforms
 
 router = APIRouter(prefix="/api", tags=["douban"])
 
@@ -22,10 +22,14 @@ class SyncResponse(BaseModel):
 
 
 async def _do_sync(douban_id: str):
-    """Background task: scrape Douban + enrich with TMDB."""
+    """Background task: scrape Douban lists + enrich from Douban detail pages + search platforms."""
     from ..database import SessionLocal
 
-    # Step 1: Scrape Douban
+    import asyncio
+    import random
+    import httpx
+
+    # Step 1: Scrape user lists
     all_movies = await douban_scraper.sync_douban_user(douban_id)
 
     if not all_movies:
@@ -40,9 +44,8 @@ async def _do_sync(douban_id: str):
             db.add(user)
             db.flush()
 
-        # Step 2: Save movies and enrich via TMDB
+        # Step 2: Save movies
         for dm in all_movies:
-            # Upsert movie
             movie = db.query(Movie).filter(Movie.douban_id == dm.douban_id).first()
             if not movie:
                 movie = Movie(
@@ -53,7 +56,6 @@ async def _do_sync(douban_id: str):
                 db.add(movie)
                 db.flush()
 
-            # Upsert user-movie relation
             um = (
                 db.query(UserMovie)
                 .filter(UserMovie.user_id == user.id, UserMovie.movie_id == movie.id)
@@ -73,49 +75,68 @@ async def _do_sync(douban_id: str):
 
         db.commit()
 
-        # Step 3: Enrich movies with TMDB data (genres, providers, poster)
+        # Step 3: Enrich unenriched movies from Douban detail pages
         movies_to_enrich = (
-            db.query(Movie).filter(Movie.tmdb_id.is_(None)).all()
+            db.query(Movie).filter(Movie.enriched == 0).all()
         )
 
-        batch = [{"title": m.title, "year": m.year} for m in movies_to_enrich]
-        if batch:
-            enrichments = await tmdb_client.batch_enrich(batch, concurrency=3)
+        progress = douban_scraper.get_progress(douban_id)
+        progress.phase = "enriching"
+        progress.enrich_total = len(movies_to_enrich)
+        progress.enriched_count = 0
 
-            for movie, enrichment in zip(movies_to_enrich, enrichments):
-                if not enrichment:
-                    continue
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            for movie in movies_to_enrich:
+                detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
 
-                movie.tmdb_id = enrichment["tmdb_id"]
-                movie.genres = json.dumps(enrichment["genres"], ensure_ascii=False)
-                movie.directors = json.dumps(enrichment["directors"], ensure_ascii=False)
-                movie.actors = json.dumps(enrichment["actors"], ensure_ascii=False)
-                movie.poster_url = enrichment.get("poster_url")
+                if detail:
+                    if detail.douban_rating is not None:
+                        movie.douban_rating = detail.douban_rating
+                    if detail.genres:
+                        movie.genres = json.dumps(detail.genres, ensure_ascii=False)
+                    if detail.directors:
+                        movie.directors = json.dumps(detail.directors, ensure_ascii=False)
+                    if detail.actors:
+                        movie.actors = json.dumps(detail.actors, ensure_ascii=False)
+                    if detail.poster_url:
+                        movie.poster_url = detail.poster_url
 
-                if enrichment.get("douban_rating") and not movie.douban_rating:
-                    movie.douban_rating = enrichment["douban_rating"]
+                movie.enriched = 1
+                progress.enriched_count += 1
+                db.commit()
 
-                # Save provider info
-                for prov in enrichment.get("providers", []):
-                    existing = (
-                        db.query(MovieProvider)
-                        .filter(
-                            MovieProvider.movie_id == movie.id,
-                            MovieProvider.provider_id == prov["provider_id"],
-                        )
-                        .first()
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+
+        # Step 4: Search platforms for movies that have no provider data yet
+        movies_no_providers = (
+            db.query(Movie)
+            .outerjoin(MovieProvider)
+            .filter(MovieProvider.id.is_(None))
+            .all()
+        )
+
+        for movie in movies_no_providers:
+            matched = await search_platforms(movie.title)
+            for p in matched:
+                existing = (
+                    db.query(MovieProvider)
+                    .filter(
+                        MovieProvider.movie_id == movie.id,
+                        MovieProvider.provider_key == p["key"],
                     )
-                    if not existing:
-                        db.add(
-                            MovieProvider(
-                                movie_id=movie.id,
-                                provider_name=prov["name"],
-                                provider_id=prov["provider_id"],
-                                updated_at=datetime.utcnow(),
-                            )
+                    .first()
+                )
+                if not existing:
+                    db.add(
+                        MovieProvider(
+                            movie_id=movie.id,
+                            provider_key=p["key"],
+                            provider_name=p["name"],
+                            updated_at=datetime.utcnow(),
                         )
-
+                    )
             db.commit()
+            await asyncio.sleep(random.uniform(1.0, 2.0))
 
         user.last_synced = datetime.utcnow()
         db.commit()
@@ -144,6 +165,8 @@ async def sync_status(douban_id: str):
         "current_page": progress.current_page,
         "total_pages": progress.total_pages,
         "total_items": progress.total_items,
+        "enriched_count": progress.enriched_count,
+        "enrich_total": progress.enrich_total,
         "error": progress.error,
     }
 
@@ -159,7 +182,6 @@ async def user_profile(douban_id: str, db: Session = Depends(get_db)):
 
     profile = build_user_profile(db, user.id)
 
-    # Get counts
     watched_count = (
         db.query(UserMovie)
         .filter(UserMovie.user_id == user.id, UserMovie.status == "watched")
@@ -171,7 +193,6 @@ async def user_profile(douban_id: str, db: Session = Depends(get_db)):
         .count()
     )
 
-    # Top genres, directors, actors
     top_genres = sorted(profile["genre_weights"].items(), key=lambda x: x[1], reverse=True)[:5]
     top_directors = sorted(profile["director_weights"].items(), key=lambda x: x[1], reverse=True)[:5]
     top_actors = sorted(profile["actor_weights"].items(), key=lambda x: x[1], reverse=True)[:5]
