@@ -21,17 +21,17 @@ class SyncResponse(BaseModel):
 
 
 async def _do_sync(douban_id: str):
-    """Background task: scrape Douban lists + enrich from Douban detail pages."""
+    """Background task: scrape movies, TV, books + enrich from detail pages."""
     from ..database import SessionLocal
 
     import asyncio
     import random
     import httpx
 
-    # Step 1: Scrape user lists
-    all_movies = await douban_scraper.sync_douban_user(douban_id)
+    # Step 1: Scrape all lists (movies+TV+books)
+    all_items = await douban_scraper.sync_douban_user_full(douban_id)
 
-    if not all_movies:
+    if not all_items:
         progress = douban_scraper.get_progress(douban_id)
         if progress.phase != "error":
             progress.phase = "done"
@@ -39,21 +39,21 @@ async def _do_sync(douban_id: str):
 
     db = SessionLocal()
     try:
-        # Ensure user exists
         user = db.query(User).filter(User.douban_id == douban_id).first()
         if not user:
             user = User(douban_id=douban_id)
             db.add(user)
             db.flush()
 
-        # Step 2: Save movies
-        for dm in all_movies:
+        # Step 2: Save items
+        for dm in all_items:
             movie = db.query(Movie).filter(Movie.douban_id == dm.douban_id).first()
             if not movie:
                 movie = Movie(
                     douban_id=dm.douban_id,
                     title=dm.title,
                     year=dm.year,
+                    media_type=dm.media_type,
                 )
                 db.add(movie)
                 db.flush()
@@ -77,28 +77,28 @@ async def _do_sync(douban_id: str):
 
         db.commit()
 
-        # Step 3: Enrich unenriched movies from Douban detail pages
-        movies_to_enrich = (
-            db.query(Movie).filter(Movie.enriched == 0).all()
-        )
+        # Step 3: Enrich unenriched items
+        items_to_enrich = db.query(Movie).filter(Movie.enriched == 0).all()
 
         progress = douban_scraper.get_progress(douban_id)
         progress.phase = "enriching"
-        progress.enrich_total = len(movies_to_enrich)
+        progress.enrich_total = len(items_to_enrich)
         progress.enriched_count = 0
 
         sem = asyncio.Semaphore(5)
 
         async def _enrich_one(client, movie):
             async with sem:
-                detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
+                if movie.media_type == "book":
+                    detail = await douban_scraper.fetch_book_detail(client, movie.douban_id)
+                else:
+                    detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
                 await asyncio.sleep(random.uniform(0.3, 0.8))
                 return movie, detail
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
-            # Process in batches of 15
-            for i in range(0, len(movies_to_enrich), 15):
-                batch = movies_to_enrich[i:i + 15]
+            for i in range(0, len(items_to_enrich), 15):
+                batch = items_to_enrich[i:i + 15]
                 results = await asyncio.gather(
                     *[_enrich_one(client, m) for m in batch]
                 )
@@ -115,6 +115,9 @@ async def _do_sync(douban_id: str):
                             movie.actors = json.dumps(detail.actors, ensure_ascii=False)
                         if detail.poster_url:
                             movie.poster_url = detail.poster_url
+                        # Update media_type if detected from detail page
+                        if detail.media_type and movie.media_type != "book":
+                            movie.media_type = detail.media_type
 
                     movie.enriched = 1
                     progress.enriched_count += 1
@@ -133,7 +136,7 @@ async def _do_sync(douban_id: str):
 
 @router.post("/sync", response_model=SyncResponse)
 async def sync_douban(req: SyncRequest, background_tasks: BackgroundTasks):
-    """Start syncing a Douban user's movie data."""
+    """Start syncing a Douban user's movie, TV, and book data."""
     douban_id = req.douban_id.strip().strip("/").split("/")[-1]
     background_tasks.add_task(_do_sync, douban_id)
     return SyncResponse(message="同步已开始", douban_id=douban_id)
@@ -141,7 +144,6 @@ async def sync_douban(req: SyncRequest, background_tasks: BackgroundTasks):
 
 @router.get("/sync/status/{douban_id}")
 async def sync_status(douban_id: str):
-    """Check the sync progress for a user."""
     progress = douban_scraper.get_progress(douban_id)
     return {
         "phase": progress.phase,
@@ -156,7 +158,6 @@ async def sync_status(douban_id: str):
 
 @router.get("/profile/{douban_id}")
 async def user_profile(douban_id: str, db: Session = Depends(get_db)):
-    """Get user's taste profile summary."""
     from ..services.recommender import build_user_profile
 
     user = db.query(User).filter(User.douban_id == douban_id).first()
@@ -165,16 +166,12 @@ async def user_profile(douban_id: str, db: Session = Depends(get_db)):
 
     profile = build_user_profile(db, user.id)
 
-    watched_count = (
-        db.query(UserMovie)
-        .filter(UserMovie.user_id == user.id, UserMovie.status == "watched")
-        .count()
-    )
-    wish_count = (
-        db.query(UserMovie)
-        .filter(UserMovie.user_id == user.id, UserMovie.status == "wish")
-        .count()
-    )
+    # Counts by media type
+    def _count(status, media_type=None):
+        q = db.query(UserMovie).join(Movie).filter(UserMovie.user_id == user.id, UserMovie.status == status)
+        if media_type:
+            q = q.filter(Movie.media_type == media_type)
+        return q.count()
 
     top_genres = sorted(profile["genre_weights"].items(), key=lambda x: x[1], reverse=True)[:5]
     top_directors = sorted(profile["director_weights"].items(), key=lambda x: x[1], reverse=True)[:5]
@@ -183,8 +180,10 @@ async def user_profile(douban_id: str, db: Session = Depends(get_db)):
     return {
         "douban_id": douban_id,
         "last_synced": user.last_synced.isoformat() if user.last_synced else None,
-        "watched_count": watched_count,
-        "wish_count": wish_count,
+        "watched_count": _count("watched"),
+        "wish_count": _count("wish"),
+        "movie_count": _count("watched", "movie") + _count("watched", "tv"),
+        "book_count": _count("watched", "book"),
         "top_genres": [{"name": g, "weight": round(w, 2)} for g, w in top_genres],
         "top_directors": [{"name": d, "weight": round(w, 2)} for d, w in top_directors],
         "top_actors": [{"name": a, "weight": round(w, 2)} for a, w in top_actors],

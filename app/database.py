@@ -34,12 +34,13 @@ class Movie(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     douban_id = Column(Text, unique=True, nullable=False)
+    media_type = Column(Text, default="movie")  # "movie", "tv", "book"
     title = Column(Text, nullable=False)
     enriched = Column(Integer, default=0)  # 0=pending, 1=done
     year = Column(Integer, nullable=True)
     douban_rating = Column(Float, nullable=True)
     genres = Column(Text, default="[]")  # JSON array
-    directors = Column(Text, default="[]")  # JSON array
+    directors = Column(Text, default="[]")  # JSON array (or "authors" for books)
     actors = Column(Text, default="[]")  # JSON array
     poster_url = Column(Text, nullable=True)
 

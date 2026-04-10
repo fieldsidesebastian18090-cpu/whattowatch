@@ -23,6 +23,7 @@ class DoubanMovie:
     year: int | None = None
     user_rating: int | None = None  # 1-5 stars
     status: str = ""  # "watched" or "wish"
+    media_type: str = "movie"  # "movie", "tv", "book"
 
 
 @dataclass
@@ -32,6 +33,7 @@ class MovieDetail:
     directors: list[str] | None = None
     actors: list[str] | None = None
     poster_url: str | None = None
+    media_type: str | None = None  # detected from detail page
 
 
 @dataclass
@@ -157,6 +159,14 @@ def parse_movie_detail(html: str) -> MovieDetail:
     poster_tag = soup.select_one("#mainpic img")
     if poster_tag and poster_tag.get("src"):
         detail.poster_url = poster_tag["src"]
+
+    # Detect TV show vs movie
+    info_text = soup.select_one("#info")
+    info_str = info_text.get_text() if info_text else ""
+    if "集数" in info_str or "首播" in info_str:
+        detail.media_type = "tv"
+    else:
+        detail.media_type = "movie"
 
     return detail
 
@@ -293,21 +303,24 @@ async def sync_douban_user(douban_id: str) -> list[DoubanMovie]:
 
 
 async def discover_by_tags(
-    tags: list[str], exclude_ids: set[str], limit: int = 50
+    tags: list[str], exclude_ids: set[str],
+    media_type: str = "movie", limit: int = 50
 ) -> list[dict]:
-    """Discover movies from Douban by genre tags (JSON API, no anti-bot challenge).
+    """Discover movies/TV from Douban by genre tags (JSON API).
 
-    Returns list of dicts: [{douban_id, title, rating, poster_url}]
+    Args:
+        media_type: "movie" or "tv"
     """
-    discovered = {}  # douban_id -> dict, deduplicate
+    discovered = {}
+    douban_type = "tv" if media_type == "tv" else "movie"
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=False) as client:
-        for tag in tags[:5]:  # Top 5 genres
+        for tag in tags[:5]:
             try:
                 resp = await client.get(
                     "https://movie.douban.com/j/search_subjects",
                     params={
-                        "type": "movie",
+                        "type": douban_type,
                         "tag": tag,
                         "sort": "recommend",
                         "page_limit": 20,
@@ -327,12 +340,242 @@ async def discover_by_tags(
                             "title": item.get("title", ""),
                             "douban_rating": float(rate) if rate else None,
                             "poster_url": item.get("cover", ""),
+                            "media_type": media_type,
                         }
             except (httpx.HTTPError, ValueError):
                 continue
 
             await asyncio.sleep(random.uniform(0.5, 1.0))
+            if len(discovered) >= limit:
+                break
 
+    return list(discovered.values())[:limit]
+
+
+# ========== Book Scraping ==========
+
+BOOK_BASE = "https://book.douban.com/people"
+BOOK_SUBJECT = "https://book.douban.com/subject"
+
+
+def _parse_book_list_page(html: str, status: str) -> list[DoubanMovie]:
+    """Parse a Douban book list page."""
+    soup = BeautifulSoup(html, "html.parser")
+    items = soup.select(".subject-item")
+    books: list[DoubanMovie] = []
+
+    for item in items:
+        book = DoubanMovie(status=status, media_type="book")
+
+        link = item.select_one("h2 a")
+        if link and link.get("href"):
+            href = link["href"]
+            match = re.search(r"/subject/(\d+)/", href)
+            if match:
+                book.douban_id = match.group(1)
+            book.title = link.get_text(strip=True)
+
+        # Year from pub info
+        pub = item.select_one(".pub")
+        if pub:
+            text = pub.get_text(strip=True)
+            year_match = re.search(r"(\d{4})", text)
+            if year_match:
+                book.year = int(year_match.group(1))
+
+        # User rating
+        rating_tag = item.select_one('[class*="rating"]')
+        if rating_tag:
+            for cls in rating_tag.get("class", []):
+                star_match = re.search(r"rating(\d)-t", cls)
+                if star_match:
+                    book.user_rating = int(star_match.group(1))
+                    break
+
+        if book.douban_id:
+            books.append(book)
+
+    return books
+
+
+def _get_book_total_count(html: str) -> int:
+    """Extract total count from book list page."""
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in [".article h2", "#db-book-mine h2", "h2"]:
+        tag = soup.select_one(selector)
+        if tag:
+            match = re.search(r"(\d+)", tag.get_text())
+            if match:
+                return int(match.group(1))
+    items = soup.select(".subject-item")
+    return len(items)
+
+
+def parse_book_detail(html: str) -> MovieDetail:
+    """Parse a Douban book detail page."""
+    soup = BeautifulSoup(html, "html.parser")
+    detail = MovieDetail(media_type="book")
+
+    # Rating
+    rating_tag = soup.select_one("strong.rating_num, strong[property='v:average']")
+    if rating_tag:
+        try:
+            detail.douban_rating = float(rating_tag.get_text(strip=True))
+        except ValueError:
+            pass
+
+    # Author (stored in directors field)
+    info = soup.select_one("#info")
+    if info:
+        info_text = info.get_text()
+        author_match = re.search(r"作者[:\s]*(.+?)(?:\n|出版)", info_text)
+        if author_match:
+            authors = [a.strip() for a in re.split(r'[/,，]', author_match.group(1)) if a.strip()]
+            detail.directors = authors[:5]
+
+    # Genres/tags
+    tag_tags = soup.select("a.tag")
+    if tag_tags:
+        detail.genres = [t.get_text(strip=True) for t in tag_tags[:10]]
+
+    # Cover
+    poster_tag = soup.select_one("#mainpic img")
+    if poster_tag and poster_tag.get("src"):
+        detail.poster_url = poster_tag["src"]
+
+    return detail
+
+
+async def fetch_book_detail(
+    client: httpx.AsyncClient, douban_id: str
+) -> MovieDetail | None:
+    """Fetch and parse a book detail page."""
+    url = f"{BOOK_SUBJECT}/{douban_id}/"
+    try:
+        resp = await client.get(url, headers=_headers())
+        resp.raise_for_status()
+        html = resp.text
+
+        if "sec.douban.com" in str(resp.url) or 'id="sec"' in html:
+            html = await _solve_douban_challenge(client, html, str(resp.url))
+            if not html:
+                return None
+
+        return parse_book_detail(html)
+    except httpx.HTTPError:
+        return None
+
+
+async def scrape_user_books(
+    douban_id: str, status: str, max_pages: int = 20
+) -> list[DoubanMovie]:
+    """Scrape a user's read or wish-to-read book list."""
+    path = "collect" if status == "watched" else "wish"
+    url_base = f"{BOOK_BASE}/{douban_id}/{path}"
+    all_books: list[DoubanMovie] = []
+
+    progress = _progress.setdefault(douban_id, SyncProgress())
+    progress.phase = f"syncing_books_{status}"
+    progress.current_page = 0
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
+        for page in range(max_pages):
+            start = page * 15
+            url = f"{url_base}?start={start}&sort=time&rating=all&filter=all&mode=list"
+
+            try:
+                resp = await client.get(url, headers=_headers())
+                resp.raise_for_status()
+            except httpx.HTTPError as e:
+                progress.error = f"书籍请求失败: {e}"
+                break
+
+            html = resp.text
+
+            if page == 0:
+                total = _get_book_total_count(html)
+                progress.total_pages = (total + 14) // 15 if total else 1
+                progress.total_items += total
+
+            books = _parse_book_list_page(html, status)
+            if not books:
+                break
+
+            all_books.extend(books)
+            progress.current_page = page + 1
+
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+
+    return all_books
+
+
+async def sync_douban_user_full(douban_id: str) -> list[DoubanMovie]:
+    """Sync movies, TV shows, and books for a user."""
+    _progress[douban_id] = SyncProgress()
+
+    # Movies + TV (from movie.douban.com, distinguished during enrichment)
+    watched = await scrape_user_movies(douban_id, "watched")
+    wish = await scrape_user_movies(douban_id, "wish")
+
+    # Books (from book.douban.com)
+    books_read = await scrape_user_books(douban_id, "watched")
+    books_wish = await scrape_user_books(douban_id, "wish")
+
+    progress = _progress[douban_id]
+    if progress.phase != "error":
+        progress.phase = "done"
+
+    return watched + wish + books_read + books_wish
+
+
+async def discover_books_by_tags(
+    tags: list[str], exclude_ids: set[str], limit: int = 30
+) -> list[dict]:
+    """Discover books from Douban by searching tags."""
+    discovered = {}
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=False) as client:
+        for tag in tags[:5]:
+            try:
+                url = f"https://book.douban.com/tag/{tag}"
+                resp = await client.get(url, headers=_headers())
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                for item in soup.select(".subject-item"):
+                    link = item.select_one("h2 a")
+                    if not link or not link.get("href"):
+                        continue
+                    match = re.search(r"/subject/(\d+)/", link["href"])
+                    if not match:
+                        continue
+                    did = match.group(1)
+                    if did in exclude_ids or did in discovered:
+                        continue
+
+                    title = link.get_text(strip=True)
+                    rating_tag = item.select_one(".rating_nums")
+                    rating = None
+                    if rating_tag:
+                        try:
+                            rating = float(rating_tag.get_text(strip=True))
+                        except ValueError:
+                            pass
+
+                    cover_tag = item.select_one("img")
+                    cover = cover_tag.get("src", "") if cover_tag else ""
+
+                    discovered[did] = {
+                        "douban_id": did,
+                        "title": title,
+                        "douban_rating": rating,
+                        "poster_url": cover,
+                        "media_type": "book",
+                    }
+            except (httpx.HTTPError, ValueError):
+                continue
+
+            await asyncio.sleep(random.uniform(0.5, 1.0))
             if len(discovered) >= limit:
                 break
 
