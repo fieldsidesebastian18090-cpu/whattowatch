@@ -161,15 +161,75 @@ def parse_movie_detail(html: str) -> MovieDetail:
     return detail
 
 
+async def _solve_douban_challenge(
+    client: httpx.AsyncClient, html: str, resp_url: str
+) -> str | None:
+    """Solve Douban's SHA-512 proof-of-work anti-bot challenge.
+
+    Returns the real page HTML, or None if solving fails.
+    """
+    import hashlib
+
+    soup = BeautifulSoup(html, "html.parser")
+    tok_tag = soup.select_one("#tok")
+    cha_tag = soup.select_one("#cha")
+    red_tag = soup.select_one("#red")
+
+    if not tok_tag or not cha_tag:
+        return None
+
+    tok = tok_tag.get("value", "")
+    cha = cha_tag.get("value", "")
+    redirect_url = red_tag.get("value", "") if red_tag else ""
+
+    # Find nonce where sha512(cha + nonce) starts with "0000"
+    nonce = 0
+    while True:
+        nonce += 1
+        h = hashlib.sha512((cha + str(nonce)).encode()).hexdigest()
+        if h[:4] == "0000":
+            break
+        if nonce > 5_000_000:
+            return None
+
+    # Extract form action base URL
+    form = soup.select_one("#sec")
+    action = form.get("action", "/c") if form else "/c"
+
+    # Build the POST URL from sec.douban.com
+    from urllib.parse import urljoin
+    post_url = urljoin(str(resp_url), action)
+
+    post_resp = await client.post(
+        post_url,
+        data={"tok": tok, "cha": cha, "sol": str(nonce)},
+        headers=_headers(),
+    )
+
+    # Should redirect to the real page
+    if post_resp.status_code in (200,) and len(post_resp.text) > 5000:
+        return post_resp.text
+
+    return None
+
+
 async def fetch_movie_detail(
     client: httpx.AsyncClient, douban_id: str
 ) -> MovieDetail | None:
-    """Fetch and parse a single movie's detail page."""
+    """Fetch and parse a single movie's detail page, solving anti-bot challenges."""
     url = f"{DOUBAN_SUBJECT}/{douban_id}/"
     try:
         resp = await client.get(url, headers=_headers())
         resp.raise_for_status()
-        return parse_movie_detail(resp.text)
+        html = resp.text
+
+        # Check if we hit the anti-bot challenge page
+        if "sec.douban.com" in str(resp.url) or 'id="sec"' in html:
+            html = await _solve_douban_challenge(client, html, str(resp.url))
+            if not html:
+                return None
+
+        return parse_movie_detail(html)
     except httpx.HTTPError:
         return None
 

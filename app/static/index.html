@@ -22,17 +22,14 @@
   </script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
-    .fade-enter-from, .fade-leave-to { opacity: 0; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #0f0f0f; }
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
     .platform-btn { transition: all 0.2s ease; }
     .platform-btn.active { box-shadow: 0 0 0 2px #e50914; }
-    .match-ring {
-      background: conic-gradient(#e50914 calc(var(--pct) * 1%), #333 0);
-      border-radius: 50%;
-    }
+    .movie-card { cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .movie-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.4); }
+    .modal-backdrop { backdrop-filter: blur(8px); }
   </style>
 </head>
 <body class="bg-bg text-gray-200 min-h-screen">
@@ -152,7 +149,8 @@
       <div
         v-for="(item, idx) in recommendations"
         :key="item.movie_id"
-        class="bg-bg-card rounded-xl overflow-hidden hover:bg-bg-hover transition-colors group"
+        @click="openDetail(item)"
+        class="movie-card bg-bg-card rounded-xl overflow-hidden"
       >
         <!-- Poster -->
         <div class="relative aspect-[2/3] bg-gray-800">
@@ -189,12 +187,16 @@
             <span v-if="item.year">{{ item.year }}</span>
             <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
           </div>
+          <!-- Director -->
+          <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">
+            {{ item.directors.slice(0, 2).join(' / ') }}
+          </div>
           <!-- Genres -->
           <div class="flex flex-wrap gap-1 mb-2">
-            <span v-for="g in item.genres.slice(0, 2)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
+            <span v-for="g in item.genres.slice(0, 3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
           </div>
           <!-- Platforms -->
-          <div class="flex gap-1">
+          <div class="flex flex-wrap gap-1">
             <span v-for="pl in item.platforms" :key="pl.name" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">
               {{ pl.name }}
             </span>
@@ -208,6 +210,82 @@
   <div v-if="recsLoaded && !recommendations.length" class="text-center py-16 text-gray-500">
     <p class="text-xl mb-2">没有找到推荐内容</p>
     <p class="text-sm">试试选择更多平台，或等待同步完成后重试</p>
+  </div>
+
+  <!-- Movie Detail Modal -->
+  <div v-if="detailMovie" @click.self="detailMovie = null"
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 modal-backdrop p-4">
+    <div class="bg-bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+      <div class="flex flex-col sm:flex-row gap-6 p-6">
+        <!-- Poster -->
+        <div class="sm:w-48 flex-shrink-0">
+          <img
+            v-if="detailMovie.poster_url"
+            :src="detailMovie.poster_url"
+            :alt="detailMovie.title"
+            class="w-full rounded-lg shadow-lg"
+          />
+          <div v-else class="w-full aspect-[2/3] bg-gray-800 rounded-lg flex items-center justify-center text-gray-600 text-6xl">?</div>
+        </div>
+
+        <!-- Details -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between mb-3">
+            <h2 class="text-2xl font-bold">{{ detailMovie.title }}</h2>
+            <button @click="detailMovie = null" class="text-gray-500 hover:text-white text-2xl leading-none ml-4">&times;</button>
+          </div>
+
+          <div class="flex items-center gap-3 mb-4">
+            <span v-if="detailMovie.year" class="text-gray-400">{{ detailMovie.year }}</span>
+            <span v-if="detailMovie.douban_rating" class="bg-gold/20 text-gold font-bold px-2 py-0.5 rounded">
+              {{ detailMovie.douban_rating.toFixed(1) }}
+            </span>
+            <span class="text-sm px-2 py-0.5 rounded"
+                  :class="detailMovie.match_pct >= 70 ? 'bg-green-500/20 text-green-400' : detailMovie.match_pct >= 40 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-700 text-gray-400'">
+              {{ detailMovie.match_pct }}% 匹配
+            </span>
+            <span v-if="detailMovie.source === '来自想看清单'" class="bg-gold/20 text-gold text-sm px-2 py-0.5 rounded">想看</span>
+          </div>
+
+          <!-- Genres -->
+          <div v-if="detailMovie.genres.length" class="mb-4">
+            <div class="text-xs text-gray-500 mb-1">类型</div>
+            <div class="flex flex-wrap gap-1">
+              <span v-for="g in detailMovie.genres" :key="g" class="bg-gray-700 text-gray-200 text-sm px-2 py-1 rounded">{{ g }}</span>
+            </div>
+          </div>
+
+          <!-- Directors -->
+          <div v-if="detailMovie.directors && detailMovie.directors.length" class="mb-4">
+            <div class="text-xs text-gray-500 mb-1">导演</div>
+            <div class="text-sm text-gray-200">{{ detailMovie.directors.join(' / ') }}</div>
+          </div>
+
+          <!-- Actors -->
+          <div v-if="detailMovie.actors && detailMovie.actors.length" class="mb-4">
+            <div class="text-xs text-gray-500 mb-1">演员</div>
+            <div class="text-sm text-gray-200">{{ detailMovie.actors.join(' / ') }}</div>
+          </div>
+
+          <!-- Platforms -->
+          <div v-if="detailMovie.platforms.length" class="mb-4">
+            <div class="text-xs text-gray-500 mb-1">可观看平台</div>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="pl in detailMovie.platforms" :key="pl.name" class="bg-accent/20 text-accent text-sm px-3 py-1 rounded-lg">
+                {{ pl.name }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Douban link -->
+          <a :href="'https://movie.douban.com/subject/' + detailMovie.douban_id + '/'"
+             target="_blank" rel="noopener"
+             class="inline-block mt-2 text-sm text-green-400 hover:text-green-300 underline">
+            在豆瓣查看 &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Footer -->
@@ -233,6 +311,7 @@ createApp({
     const recommendations = ref([])
     const loadingRecs = ref(false)
     const recsLoaded = ref(false)
+    const detailMovie = ref(null)
 
     const platformIcons = {
       tencent: '📺', iqiyi: '🎬', youku: '🎥', mango: '🥭',
@@ -343,11 +422,16 @@ createApp({
       }
     }
 
+    function openDetail(item) {
+      detailMovie.value = item
+    }
+
     return {
       doubanId, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
       profile, platforms, selectedPlatforms, platformIcons,
       recommendations, loadingRecs, recsLoaded,
-      startSync, togglePlatform, getRecommendations
+      detailMovie,
+      startSync, togglePlatform, getRecommendations, openDetail
     }
   }
 }).mount('#app')

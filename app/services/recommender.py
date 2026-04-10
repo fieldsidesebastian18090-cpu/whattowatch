@@ -143,6 +143,8 @@ def get_recommendations(
             "douban_rating": movie.douban_rating,
             "poster_url": movie.poster_url,
             "genres": json.loads(movie.genres) if movie.genres else [],
+            "directors": json.loads(movie.directors) if movie.directors else [],
+            "actors": json.loads(movie.actors) if movie.actors else [],
             "score": round(final_score, 3),
             "match_pct": round(pref_score * 100),
             "source": source,

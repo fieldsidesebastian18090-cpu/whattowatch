@@ -5,9 +5,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import Movie, MovieProvider, User, UserMovie, get_db
+from ..database import Movie, User, UserMovie, get_db
 from ..services import douban_scraper
-from ..services.platform_search import search_platforms
 
 router = APIRouter(prefix="/api", tags=["douban"])
 
@@ -22,7 +21,7 @@ class SyncResponse(BaseModel):
 
 
 async def _do_sync(douban_id: str):
-    """Background task: scrape Douban lists + enrich from Douban detail pages + search platforms."""
+    """Background task: scrape Douban lists + enrich from Douban detail pages."""
     from ..database import SessionLocal
 
     import asyncio
@@ -33,6 +32,9 @@ async def _do_sync(douban_id: str):
     all_movies = await douban_scraper.sync_douban_user(douban_id)
 
     if not all_movies:
+        progress = douban_scraper.get_progress(douban_id)
+        if progress.phase != "error":
+            progress.phase = "done"
         return
 
     db = SessionLocal()
@@ -85,58 +87,39 @@ async def _do_sync(douban_id: str):
         progress.enrich_total = len(movies_to_enrich)
         progress.enriched_count = 0
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
-            for movie in movies_to_enrich:
+        sem = asyncio.Semaphore(5)
+
+        async def _enrich_one(client, movie):
+            async with sem:
                 detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                return movie, detail
 
-                if detail:
-                    if detail.douban_rating is not None:
-                        movie.douban_rating = detail.douban_rating
-                    if detail.genres:
-                        movie.genres = json.dumps(detail.genres, ensure_ascii=False)
-                    if detail.directors:
-                        movie.directors = json.dumps(detail.directors, ensure_ascii=False)
-                    if detail.actors:
-                        movie.actors = json.dumps(detail.actors, ensure_ascii=False)
-                    if detail.poster_url:
-                        movie.poster_url = detail.poster_url
-
-                movie.enriched = 1
-                progress.enriched_count += 1
-                db.commit()
-
-                await asyncio.sleep(random.uniform(2.0, 4.0))
-
-        # Step 4: Search platforms for movies that have no provider data yet
-        movies_no_providers = (
-            db.query(Movie)
-            .outerjoin(MovieProvider)
-            .filter(MovieProvider.id.is_(None))
-            .all()
-        )
-
-        for movie in movies_no_providers:
-            matched = await search_platforms(movie.title)
-            for p in matched:
-                existing = (
-                    db.query(MovieProvider)
-                    .filter(
-                        MovieProvider.movie_id == movie.id,
-                        MovieProvider.provider_key == p["key"],
-                    )
-                    .first()
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
+            # Process in batches of 15
+            for i in range(0, len(movies_to_enrich), 15):
+                batch = movies_to_enrich[i:i + 15]
+                results = await asyncio.gather(
+                    *[_enrich_one(client, m) for m in batch]
                 )
-                if not existing:
-                    db.add(
-                        MovieProvider(
-                            movie_id=movie.id,
-                            provider_key=p["key"],
-                            provider_name=p["name"],
-                            updated_at=datetime.utcnow(),
-                        )
-                    )
-            db.commit()
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+
+                for movie, detail in results:
+                    if detail:
+                        if detail.douban_rating is not None:
+                            movie.douban_rating = detail.douban_rating
+                        if detail.genres:
+                            movie.genres = json.dumps(detail.genres, ensure_ascii=False)
+                        if detail.directors:
+                            movie.directors = json.dumps(detail.directors, ensure_ascii=False)
+                        if detail.actors:
+                            movie.actors = json.dumps(detail.actors, ensure_ascii=False)
+                        if detail.poster_url:
+                            movie.poster_url = detail.poster_url
+
+                    movie.enriched = 1
+                    progress.enriched_count += 1
+
+                db.commit()
 
         user.last_synced = datetime.utcnow()
         db.commit()
