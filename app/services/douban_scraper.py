@@ -50,18 +50,33 @@ class SyncProgress:
 # In-memory progress tracker keyed by douban_id
 _progress: dict[str, SyncProgress] = {}
 
+# Douban cookie for authenticated requests
+_douban_cookie: str = ""
+
+
+def set_cookie(cookie: str):
+    global _douban_cookie
+    _douban_cookie = cookie
+
+
+def get_cookie() -> str:
+    return _douban_cookie
+
 
 def get_progress(douban_id: str) -> SyncProgress:
     return _progress.get(douban_id, SyncProgress())
 
 
 def _headers() -> dict[str, str]:
-    return {
+    h = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Referer": "https://movie.douban.com/",
     }
+    if _douban_cookie:
+        h["Cookie"] = _douban_cookie
+    return h
 
 
 def _parse_list_page(html: str, status: str) -> list[DoubanMovie]:

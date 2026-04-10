@@ -8,36 +8,29 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: { extend: { colors: {
-        bg: { DEFAULT: '#0f0f0f', card: '#1a1a2e', hover: '#252545' },
-        accent: '#e50914', gold: '#f5c518',
-      }}}
-    }
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: {
+      bg: { DEFAULT: '#0f0f0f', card: '#1a1a2e', hover: '#252545' },
+      accent: '#e50914', gold: '#f5c518',
+    }}}}
   </script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #0f0f0f; }
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-    .platform-btn { transition: all 0.2s ease; }
+    .platform-btn { transition: all 0.2s; }
     .platform-btn.active { box-shadow: 0 0 0 2px #e50914; }
     .movie-card { cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
     .movie-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.4); }
     .modal-backdrop { backdrop-filter: blur(8px); }
-    .tab-btn { transition: all 0.2s; }
     .tab-btn.active { border-color: #e50914; color: white; }
   </style>
 </head>
 <body class="bg-bg text-gray-200 min-h-screen">
 <div id="app" class="max-w-6xl mx-auto px-4 py-8">
 
-  <!-- Header -->
   <header class="text-center mb-10">
-    <h1 class="text-4xl font-bold mb-2">
-      <span class="text-accent">What</span>To<span class="text-gold">Watch</span>
-    </h1>
+    <h1 class="text-4xl font-bold mb-2"><span class="text-accent">What</span>To<span class="text-gold">Watch</span></h1>
     <p class="text-gray-400">从豆瓣到流媒体 — 找到最适合你的影视和书籍</p>
   </header>
 
@@ -47,15 +40,22 @@
       <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">1</span>
       同步豆瓣数据
     </h2>
-    <div class="flex gap-3">
-      <input v-model="doubanId" @keyup.enter="startSync" type="text"
-        placeholder="输入豆瓣用户ID" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-accent" />
+    <div class="flex gap-3 mb-3">
+      <input v-model="doubanId" @keyup.enter="startSync" type="text" placeholder="豆瓣用户ID"
+        class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-accent" />
       <button @click="startSync" :disabled="syncing || !doubanId.trim()"
         class="bg-accent hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
         {{ syncing ? '同步中...' : '同步' }}
       </button>
     </div>
-    <div v-if="syncing || syncPhase === 'done'" class="mt-4">
+    <!-- Cookie -->
+    <details class="mb-3">
+      <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">豆瓣需要登录？点此粘贴 Cookie</summary>
+      <textarea v-model="doubanCookie" rows="2" placeholder="从浏览器开发者工具复制 Cookie（F12 → Network → 任意请求 → Cookie 值）"
+        class="w-full mt-2 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-accent"></textarea>
+    </details>
+    <!-- Progress -->
+    <div v-if="syncing || syncPhase === 'done'" class="mt-3">
       <div class="flex justify-between text-sm text-gray-400 mb-1">
         <span>{{ syncStatusText }}</span>
         <span v-if="syncProgress.total_items">共 {{ syncProgress.total_items }} 部</span>
@@ -96,7 +96,7 @@
     </h2>
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
       <button v-for="p in platforms" :key="p.key" @click="togglePlatform(p.key)"
-        :class="['platform-btn flex flex-col items-center gap-2 p-4 rounded-xl border transition-all cursor-pointer',
+        :class="['platform-btn flex flex-col items-center gap-2 p-4 rounded-xl border cursor-pointer',
           selectedPlatforms.includes(p.key) ? 'active border-accent bg-accent/10 text-white' : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-500']">
         <span class="text-2xl">{{ platformIcons[p.key] }}</span>
         <span class="text-sm font-medium">{{ p.name }}</span>
@@ -106,154 +106,49 @@
     <div class="mt-4 flex justify-end">
       <button @click="getRecommendations" :disabled="loadingRecs"
         class="bg-accent hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-8 py-3 rounded-lg transition-colors">
-        {{ loadingRecs ? '正在推荐...' : '为我推荐' }}
+        {{ loadingRecs ? '加载中...' : '查看想看清单' }}
       </button>
     </div>
   </section>
 
-  <!-- Step 3: Results with Tabs -->
+  <!-- Step 3: Wish Lists -->
   <section v-if="recsLoaded" class="mb-10">
-    <!-- Tabs -->
     <div class="flex gap-2 mb-6">
-      <button @click="activeTab = 'video'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold', activeTab === 'video' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
-        影视 <span class="text-xs opacity-60">{{ wishItems.length + discoverItems.length }}</span>
+      <button @click="activeTab = 'movie'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold transition-all', activeTab === 'movie' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
+        想看电影 <span class="text-xs opacity-60">{{ movieWish.length }}</span>
       </button>
-      <button @click="activeTab = 'book'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold', activeTab === 'book' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
-        书籍 <span class="text-xs opacity-60">{{ bookItems.length }}</span>
+      <button @click="activeTab = 'tv'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold transition-all', activeTab === 'tv' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
+        想看剧集 <span class="text-xs opacity-60">{{ tvWish.length }}</span>
+      </button>
+      <button @click="activeTab = 'book'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold transition-all', activeTab === 'book' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
+        想读书籍 <span class="text-xs opacity-60">{{ bookWish.length }}</span>
       </button>
     </div>
 
-    <!-- Video Tab -->
-    <div v-show="activeTab === 'video'">
-      <!-- Movie Wish -->
-      <template v-if="movieWish.length">
-        <h3 class="text-base font-semibold mb-3 flex items-center gap-2">
-          <span class="w-2 h-5 bg-gold rounded-full"></span> 想看电影 <span class="text-gray-500 text-sm font-normal">{{ movieWish.length }} 部</span>
-        </h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
-          <div v-for="item in movieWish" :key="'wm'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
-            <div class="relative aspect-[2/3] bg-gray-800">
-              <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-              <div class="absolute top-2 left-2 bg-gold/90 text-black text-xs font-bold px-2 py-1 rounded">想看</div>
-              <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
-                :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
-            </div>
-            <div class="p-3">
-              <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
-              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                <span v-if="item.year">{{ item.year }}</span>
-                <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
-              </div>
-              <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
-              <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <!-- TV Wish -->
-      <template v-if="tvWish.length">
-        <h3 class="text-base font-semibold mb-3 flex items-center gap-2">
-          <span class="w-2 h-5 bg-blue-500 rounded-full"></span> 想看剧集 <span class="text-gray-500 text-sm font-normal">{{ tvWish.length }} 部</span>
-        </h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
-          <div v-for="item in tvWish" :key="'wt'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
-            <div class="relative aspect-[2/3] bg-gray-800">
-              <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-              <div class="absolute top-2 left-2 bg-blue-500/90 text-white text-xs font-bold px-2 py-1 rounded">想看</div>
-              <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
-                :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
-            </div>
-            <div class="p-3">
-              <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
-              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                <span v-if="item.year">{{ item.year }}</span>
-                <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
-              </div>
-              <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
-              <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <!-- Discover Movies -->
-      <template v-if="movieDiscover.length">
-        <h3 class="text-base font-semibold mb-3 flex items-center gap-2">
-          <span class="w-2 h-5 bg-accent rounded-full"></span> 猜你喜欢的电影 <span class="text-gray-500 text-sm font-normal">{{ movieDiscover.length }} 部</span>
-        </h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
-          <div v-for="item in movieDiscover" :key="'dm'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
-            <div class="relative aspect-[2/3] bg-gray-800">
-              <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-              <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
-                :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
-            </div>
-            <div class="p-3">
-              <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
-              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                <span v-if="item.year">{{ item.year }}</span>
-                <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
-              </div>
-              <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <!-- Discover TV -->
-      <template v-if="tvDiscover.length">
-        <h3 class="text-base font-semibold mb-3 flex items-center gap-2">
-          <span class="w-2 h-5 bg-blue-500 rounded-full"></span> 猜你喜欢的剧集 <span class="text-gray-500 text-sm font-normal">{{ tvDiscover.length }} 部</span>
-        </h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
-          <div v-for="item in tvDiscover" :key="'dt'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
-            <div class="relative aspect-[2/3] bg-gray-800">
-              <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-              <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
-                :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
-            </div>
-            <div class="p-3">
-              <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
-              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                <span v-if="item.year">{{ item.year }}</span>
-                <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
-              </div>
-              <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <div v-if="!wishItems.length && !discoverItems.length" class="text-center py-12 text-gray-500">
-        <p>暂无影视推荐</p>
-      </div>
-    </div>
-
-    <!-- Book Tab -->
-    <div v-show="activeTab === 'book'">
-      <div v-if="bookItems.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        <div v-for="item in bookItems" :key="'b'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
+    <!-- Card grid (shared template) -->
+    <div v-for="tab in ['movie','tv','book']" :key="tab" v-show="activeTab === tab">
+      <div v-if="currentList.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div v-for="item in currentList" :key="item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
             <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
             <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-            <div v-if="item.source === '来自想读清单'" class="absolute top-2 left-2 bg-green-500/90 text-white text-xs font-bold px-2 py-1 rounded">想读</div>
+            <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
+              :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
           </div>
           <div class="p-3">
             <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
             <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
+              <span v-if="item.year">{{ item.year }}</span>
               <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
             </div>
-            <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0, 2).join(' / ') }}</div>
+            <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
             <div class="flex flex-wrap gap-1">
-              <span v-for="g in (item.genres||[]).slice(0, 3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
+              <span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
             </div>
           </div>
         </div>
       </div>
-      <div v-else class="text-center py-12 text-gray-500">
-        <p>暂无书籍推荐</p>
-      </div>
+      <div v-else class="text-center py-12 text-gray-500">暂无内容</div>
     </div>
   </section>
 
@@ -282,9 +177,7 @@
           </div>
           <div v-if="detailMovie.genres && detailMovie.genres.length" class="mb-4">
             <div class="text-xs text-gray-500 mb-1">{{ detailMovie.media_type === 'book' ? '标签' : '类型' }}</div>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="g in detailMovie.genres" :key="g" class="bg-gray-700 text-gray-200 text-sm px-2 py-1 rounded">{{ g }}</span>
-            </div>
+            <div class="flex flex-wrap gap-1"><span v-for="g in detailMovie.genres" :key="g" class="bg-gray-700 text-gray-200 text-sm px-2 py-1 rounded">{{ g }}</span></div>
           </div>
           <div v-if="detailMovie.directors && detailMovie.directors.length" class="mb-4">
             <div class="text-xs text-gray-500 mb-1">{{ detailMovie.media_type === 'book' ? '作者' : '导演' }}</div>
@@ -294,26 +187,21 @@
             <div class="text-xs text-gray-500 mb-1">演员</div>
             <div class="text-sm text-gray-200">{{ detailMovie.actors.join(' / ') }}</div>
           </div>
-          <!-- Platform search links -->
           <div v-if="detailMovie.search_links && detailMovie.search_links.length" class="mb-4">
             <div class="text-xs text-gray-500 mb-2">在平台搜索</div>
             <div class="flex flex-wrap gap-2">
               <a v-for="sl in detailMovie.search_links" :key="sl.key" :href="sl.url" target="_blank" rel="noopener"
-                class="bg-accent/20 text-accent text-sm px-3 py-1.5 rounded-lg hover:bg-accent/30 transition-colors">
-                {{ sl.name }} &rarr;
-              </a>
+                class="bg-accent/20 text-accent text-sm px-3 py-1.5 rounded-lg hover:bg-accent/30 transition-colors">{{ sl.name }} &rarr;</a>
             </div>
           </div>
           <a :href="(detailMovie.media_type === 'book' ? 'https://book.douban.com/subject/' : 'https://movie.douban.com/subject/') + detailMovie.douban_id + '/'"
-            target="_blank" rel="noopener" class="inline-block mt-2 text-sm text-green-400 hover:text-green-300 underline">
-            在豆瓣查看 &rarr;
-          </a>
+            target="_blank" rel="noopener" class="inline-block mt-2 text-sm text-green-400 hover:text-green-300 underline">在豆瓣查看 &rarr;</a>
         </div>
       </div>
     </div>
   </div>
 
-  <footer class="text-center text-gray-600 text-xs py-8">WhatToWatch MVP &mdash; 数据来源: 豆瓣</footer>
+  <footer class="text-center text-gray-600 text-xs py-8">WhatToWatch &mdash; 数据来源: 豆瓣</footer>
 </div>
 
 <script>
@@ -321,27 +209,29 @@ const { createApp, ref, computed } = Vue
 createApp({
   setup() {
     const doubanId = ref('')
+    const doubanCookie = ref('')
     const syncing = ref(false)
     const syncPhase = ref('idle')
-    const syncProgress = ref({ current_page: 0, total_pages: 0, total_items: 0 })
+    const syncProgress = ref({})
     const syncError = ref('')
     const profile = ref(null)
     const platforms = ref([])
     const selectedPlatforms = ref([])
-    const wishItems = ref([])
-    const discoverItems = ref([])
-    const bookItems = ref([])
+    const movieWish = ref([])
+    const tvWish = ref([])
+    const bookWish = ref([])
     const loadingRecs = ref(false)
     const recsLoaded = ref(false)
     const detailMovie = ref(null)
-    const activeTab = ref('video')
+    const activeTab = ref('movie')
 
     const platformIcons = { tencent: '📺', iqiyi: '🎬', youku: '🎥', mango: '🥭', netflix: '🔴', disney: '🏰', max: '🟣' }
 
-    const movieWish = computed(() => wishItems.value.filter(i => i.media_type !== 'tv'))
-    const tvWish = computed(() => wishItems.value.filter(i => i.media_type === 'tv'))
-    const movieDiscover = computed(() => discoverItems.value.filter(i => i.media_type !== 'tv'))
-    const tvDiscover = computed(() => discoverItems.value.filter(i => i.media_type === 'tv'))
+    const currentList = computed(() => {
+      if (activeTab.value === 'movie') return movieWish.value
+      if (activeTab.value === 'tv') return tvWish.value
+      return bookWish.value
+    })
 
     const syncStatusText = computed(() => {
       const p = syncPhase.value
@@ -349,7 +239,7 @@ createApp({
       if (p === 'syncing_wish') return '正在同步影视「想看」...'
       if (p === 'syncing_books_watched') return '正在同步书籍「读过」...'
       if (p === 'syncing_books_wish') return '正在同步书籍「想读」...'
-      if (p === 'enriching') return `正在获取详情 (${syncProgress.value.enriched_count}/${syncProgress.value.enrich_total})...`
+      if (p === 'enriching') return `正在获取详情 (${syncProgress.value.enriched_count||0}/${syncProgress.value.enrich_total||0})...`
       if (p === 'done') return '同步完成！'
       if (p === 'error') return '同步出错'
       return '准备中...'
@@ -361,24 +251,22 @@ createApp({
         const et = syncProgress.value.enrich_total, ec = syncProgress.value.enriched_count
         return et > 0 ? Math.min(Math.round((ec / et) * 100), 99) : 10
       }
-      const t = syncProgress.value.total_pages, c = syncProgress.value.current_page
-      return t > 0 ? Math.min(Math.round((c / t) * 100), 99) : 10
+      return 10
     })
 
     let pollTimer = null
-
     async function startSync() {
       const id = doubanId.value.trim().replace(/\/$/, '').split('/').pop()
       if (!id) return
       doubanId.value = id
       syncing.value = true; syncError.value = ''; syncPhase.value = 'idle'
-      profile.value = null; wishItems.value = []; discoverItems.value = []; bookItems.value = []; recsLoaded.value = false
+      profile.value = null; movieWish.value = []; tvWish.value = []; bookWish.value = []; recsLoaded.value = false
 
       try {
-        await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ douban_id: id }) })
+        await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ douban_id: id, cookie: doubanCookie.value }) })
         pollTimer = setInterval(async () => {
-          const resp = await fetch(`/api/sync/status/${id}`)
-          const data = await resp.json()
+          const data = await (await fetch(`/api/sync/status/${id}`)).json()
           syncPhase.value = data.phase; syncProgress.value = data
           if (data.phase === 'done') { clearInterval(pollTimer); syncing.value = false; await loadProfile(id); await loadPlatforms() }
           else if (data.phase === 'error') { clearInterval(pollTimer); syncing.value = false; syncError.value = data.error || '同步出错' }
@@ -386,24 +274,23 @@ createApp({
       } catch (e) { syncing.value = false; syncError.value = '网络错误: ' + e.message }
     }
 
-    async function loadProfile(id) { const r = await fetch(`/api/profile/${id}`); const d = await r.json(); if (!d.error) profile.value = d }
-    async function loadPlatforms() { const r = await fetch('/api/platforms'); platforms.value = await r.json() }
-
-    function togglePlatform(key) {
-      const idx = selectedPlatforms.value.indexOf(key)
-      if (idx >= 0) selectedPlatforms.value.splice(idx, 1); else selectedPlatforms.value.push(key)
-    }
+    async function loadProfile(id) { const d = await (await fetch(`/api/profile/${id}`)).json(); if (!d.error) profile.value = d }
+    async function loadPlatforms() { platforms.value = await (await fetch('/api/platforms')).json() }
+    function togglePlatform(key) { const i = selectedPlatforms.value.indexOf(key); if (i >= 0) selectedPlatforms.value.splice(i, 1); else selectedPlatforms.value.push(key) }
 
     async function getRecommendations() {
       loadingRecs.value = true; recsLoaded.value = false
       try {
-        const params = new URLSearchParams({ platforms: selectedPlatforms.value.join(','), limit: '30' })
-        const resp = await fetch(`/api/recommend/${doubanId.value}?${params}`)
-        const data = await resp.json()
-        wishItems.value = data.wish_items || []
-        discoverItems.value = data.discover_items || []
-        bookItems.value = data.book_items || []
+        const params = new URLSearchParams({ platforms: selectedPlatforms.value.join(',') })
+        const data = await (await fetch(`/api/recommend/${doubanId.value}?${params}`)).json()
+        movieWish.value = data.movie_wish || []
+        tvWish.value = data.tv_wish || []
+        bookWish.value = data.book_wish || []
         recsLoaded.value = true
+        // Auto-select first non-empty tab
+        if (movieWish.value.length) activeTab.value = 'movie'
+        else if (tvWish.value.length) activeTab.value = 'tv'
+        else if (bookWish.value.length) activeTab.value = 'book'
       } catch (e) { console.error(e) }
       finally { loadingRecs.value = false }
     }
@@ -411,10 +298,9 @@ createApp({
     function openDetail(item) { detailMovie.value = item }
 
     return {
-      doubanId, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
-      profile, platforms, selectedPlatforms, platformIcons, activeTab,
-      wishItems, discoverItems, bookItems, movieWish, tvWish, movieDiscover, tvDiscover,
-      loadingRecs, recsLoaded, detailMovie,
+      doubanId, doubanCookie, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
+      profile, platforms, selectedPlatforms, platformIcons, activeTab, currentList,
+      movieWish, tvWish, bookWish, loadingRecs, recsLoaded, detailMovie,
       startSync, togglePlatform, getRecommendations, openDetail
     }
   }

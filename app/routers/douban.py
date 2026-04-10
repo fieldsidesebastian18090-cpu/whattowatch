@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api", tags=["douban"])
 
 class SyncRequest(BaseModel):
     douban_id: str
+    cookie: str = ""
 
 
 class SyncResponse(BaseModel):
@@ -138,6 +139,8 @@ async def _do_sync(douban_id: str):
 async def sync_douban(req: SyncRequest, background_tasks: BackgroundTasks):
     """Start syncing a Douban user's movie, TV, and book data."""
     douban_id = req.douban_id.strip().strip("/").split("/")[-1]
+    if req.cookie:
+        douban_scraper.set_cookie(req.cookie)
     background_tasks.add_task(_do_sync, douban_id)
     return SyncResponse(message="同步已开始", douban_id=douban_id)
 
