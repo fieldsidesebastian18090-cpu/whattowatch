@@ -106,15 +106,23 @@ def _parse_list_page(html: str, status: str) -> list[DoubanMovie]:
 def _get_total_count(html: str) -> int:
     """Extract total item count from the page."""
     soup = BeautifulSoup(html, "html.parser")
-    count_tag = soup.select_one("#db-movie-mine h2")
-    if count_tag:
-        match = re.search(r"(\d+)", count_tag.get_text())
-        if match:
-            return int(match.group(1))
-    paginator = soup.select_one(".paginator .thispage")
-    if paginator and paginator.get("data-total-page"):
-        return int(paginator["data-total-page"]) * 15
-    return 0
+
+    # Try multiple selectors for the count
+    for selector in ["#db-movie-mine h2", ".article h2", "#content h2"]:
+        tag = soup.select_one(selector)
+        if tag:
+            match = re.search(r"(\d+)", tag.get_text())
+            if match:
+                return int(match.group(1))
+
+    # Try paginator: last page number * items per page
+    last_page = soup.select_one(".paginator .thispage")
+    if last_page and last_page.get("data-total-page"):
+        return int(last_page["data-total-page"]) * 15
+
+    # Fallback: count items on current page
+    items = soup.select(".item")
+    return len(items)
 
 
 def parse_movie_detail(html: str) -> MovieDetail:
@@ -178,7 +186,7 @@ async def scrape_user_movies(
     progress.phase = f"syncing_{status}"
     progress.current_page = 0
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
         for page in range(max_pages):
             start = page * 15
             url = f"{url_base}?start={start}&sort=time&rating=all&filter=all&mode=list"

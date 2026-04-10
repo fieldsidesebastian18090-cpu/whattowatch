@@ -251,9 +251,14 @@ createApp({
 
     const progressPct = computed(() => {
       if (syncPhase.value === 'done') return 100
+      if (syncPhase.value === 'enriching') {
+        const et = syncProgress.value.enrich_total
+        const ec = syncProgress.value.enriched_count
+        return et > 0 ? Math.min(Math.round((ec / et) * 100), 99) : 10
+      }
       const t = syncProgress.value.total_pages
       const c = syncProgress.value.current_page
-      return t > 0 ? Math.round((c / t) * 100) : 10
+      return t > 0 ? Math.min(Math.round((c / t) * 100), 99) : 10
     })
 
     let pollTimer = null

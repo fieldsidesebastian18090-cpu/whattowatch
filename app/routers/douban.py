@@ -85,7 +85,7 @@ async def _do_sync(douban_id: str):
         progress.enrich_total = len(movies_to_enrich)
         progress.enriched_count = 0
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, trust_env=False) as client:
             for movie in movies_to_enrich:
                 detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
 

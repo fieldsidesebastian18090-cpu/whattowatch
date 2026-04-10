@@ -75,7 +75,7 @@ async def search_platforms(
         platform_keys = list(PROVIDERS.keys())
 
     matched = []
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with httpx.AsyncClient(follow_redirects=True, trust_env=False) as client:
         tasks = []
         for key in platform_keys:
             tasks.append(_check_platform(client, key, title))
