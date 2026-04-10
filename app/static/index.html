@@ -135,10 +135,10 @@
       </button>
     </div>
 
-    <!-- Card grid (shared template) -->
-    <div v-for="tab in ['movie','tv']" :key="tab" v-show="activeTab === tab">
-      <div v-if="currentList.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        <div v-for="item in currentList" :key="item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
+    <!-- Movie list -->
+    <div v-show="activeTab === 'movie'">
+      <div v-if="movieWish.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div v-for="item in movieWish" :key="'m'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
             <img v-if="item.poster_url" :src="imgProxy(item.poster_url)" class="w-full h-full object-cover" loading="lazy" />
             <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
@@ -152,13 +152,34 @@
               <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
             </div>
             <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
-            </div>
+            <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
           </div>
         </div>
       </div>
-      <div v-else class="text-center py-12 text-gray-500">暂无内容</div>
+      <div v-else class="text-center py-12 text-gray-500">暂无想看电影</div>
+    </div>
+    <!-- TV list -->
+    <div v-show="activeTab === 'tv'">
+      <div v-if="tvWish.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div v-for="item in tvWish" :key="'t'+item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
+          <div class="relative aspect-[2/3] bg-gray-800">
+            <img v-if="item.poster_url" :src="imgProxy(item.poster_url)" class="w-full h-full object-cover" loading="lazy" />
+            <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
+            <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
+              :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
+          </div>
+          <div class="p-3">
+            <h3 class="font-semibold text-sm truncate mb-1">{{ item.title }}</h3>
+            <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
+              <span v-if="item.year">{{ item.year }}</span>
+              <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
+            </div>
+            <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0,2).join(' / ') }}</div>
+            <div class="flex flex-wrap gap-1"><span v-for="g in (item.genres||[]).slice(0,3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span></div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-center py-12 text-gray-500">暂无想看剧集</div>
     </div>
   </section>
 
