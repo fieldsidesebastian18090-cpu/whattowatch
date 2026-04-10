@@ -29,8 +29,8 @@ async def _do_sync(douban_id: str):
     import random
     import httpx
 
-    # Step 1: Scrape all lists (movies+TV+books)
-    all_items = await douban_scraper.sync_douban_user_full(douban_id)
+    # Step 1: Scrape movie+TV lists only
+    all_items = await douban_scraper.sync_douban_user(douban_id)
 
     if not all_items:
         progress = douban_scraper.get_progress(douban_id)
@@ -90,10 +90,7 @@ async def _do_sync(douban_id: str):
 
         async def _enrich_one(client, movie):
             async with sem:
-                if movie.media_type == "book":
-                    detail = await douban_scraper.fetch_book_detail(client, movie.douban_id)
-                else:
-                    detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
+                detail = await douban_scraper.fetch_movie_detail(client, movie.douban_id)
                 await asyncio.sleep(random.uniform(0.3, 0.8))
                 return movie, detail
 

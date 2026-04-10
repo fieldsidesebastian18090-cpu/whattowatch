@@ -31,7 +31,7 @@
 
   <header class="text-center mb-10">
     <h1 class="text-4xl font-bold mb-2"><span class="text-accent">What</span>To<span class="text-gold">Watch</span></h1>
-    <p class="text-gray-400">从豆瓣到流媒体 — 找到最适合你的影视和书籍</p>
+    <p class="text-gray-400">从豆瓣到流媒体 — 找到最适合你的电影和剧集</p>
   </header>
 
   <!-- Step 1: Sync -->
@@ -120,13 +120,10 @@
       <button @click="activeTab = 'tv'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold transition-all', activeTab === 'tv' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
         想看剧集 <span class="text-xs opacity-60">{{ tvWish.length }}</span>
       </button>
-      <button @click="activeTab = 'book'" :class="['tab-btn px-5 py-2 rounded-lg border text-sm font-semibold transition-all', activeTab === 'book' ? 'active border-accent bg-accent/10' : 'border-gray-700 text-gray-400']">
-        想读书籍 <span class="text-xs opacity-60">{{ bookWish.length }}</span>
-      </button>
     </div>
 
     <!-- Card grid (shared template) -->
-    <div v-for="tab in ['movie','tv','book']" :key="tab" v-show="activeTab === tab">
+    <div v-for="tab in ['movie','tv']" :key="tab" v-show="activeTab === tab">
       <div v-if="currentList.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <div v-for="item in currentList" :key="item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
@@ -229,8 +226,7 @@ createApp({
 
     const currentList = computed(() => {
       if (activeTab.value === 'movie') return movieWish.value
-      if (activeTab.value === 'tv') return tvWish.value
-      return bookWish.value
+      return tvWish.value
     })
 
     const syncStatusText = computed(() => {
@@ -285,12 +281,9 @@ createApp({
         const data = await (await fetch(`/api/recommend/${doubanId.value}?${params}`)).json()
         movieWish.value = data.movie_wish || []
         tvWish.value = data.tv_wish || []
-        bookWish.value = data.book_wish || []
         recsLoaded.value = true
-        // Auto-select first non-empty tab
         if (movieWish.value.length) activeTab.value = 'movie'
         else if (tvWish.value.length) activeTab.value = 'tv'
-        else if (bookWish.value.length) activeTab.value = 'book'
       } catch (e) { console.error(e) }
       finally { loadingRecs.value = false }
     }

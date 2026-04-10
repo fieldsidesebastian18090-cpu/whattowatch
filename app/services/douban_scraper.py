@@ -278,6 +278,10 @@ async def scrape_user_movies(
 
             try:
                 resp = await client.get(url, headers=_headers())
+                if resp.status_code == 403 or "登录" in resp.text[:500]:
+                    progress.error = "豆瓣要求登录，请粘贴 Cookie 后重试"
+                    progress.phase = "error"
+                    break
                 resp.raise_for_status()
             except httpx.HTTPError as e:
                 progress.error = f"请求失败: {e}"
@@ -285,6 +289,16 @@ async def scrape_user_movies(
                 break
 
             html = resp.text
+
+            # Handle anti-bot challenge on list pages too
+            if "sec.douban.com" in str(resp.url) or 'id="sec"' in html:
+                solved = await _solve_douban_challenge(client, html, str(resp.url))
+                if solved:
+                    html = solved
+                else:
+                    progress.error = "反爬验证失败，请稍后重试"
+                    progress.phase = "error"
+                    break
 
             if page == 0:
                 total = _get_total_count(html)
