@@ -78,8 +78,13 @@ async def _do_sync(douban_id: str):
 
         db.commit()
 
-        # Step 3: Enrich unenriched items
-        items_to_enrich = db.query(Movie).filter(Movie.enriched == 0).all()
+        # Step 3: Enrich items without detail data or platform data
+        items_to_enrich = (
+            db.query(Movie)
+            .outerjoin(MovieProvider)
+            .filter((Movie.enriched == 0) | (MovieProvider.id.is_(None)))
+            .all()
+        )
 
         progress = douban_scraper.get_progress(douban_id)
         progress.phase = "enriching"

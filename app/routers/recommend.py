@@ -34,7 +34,7 @@ async def recommend(
     platforms: str = Query("", description="逗号分隔的平台key"),
     db: Session = Depends(get_db),
 ):
-    """Return user's wish list, filtered by selected platforms if any."""
+    """Return user's wish list filtered by selected platforms."""
     user = db.query(User).filter(User.douban_id == douban_id).first()
     if not user:
         return {"error": "用户未找到", "movie_wish": [], "tv_wish": []}
@@ -42,14 +42,13 @@ async def recommend(
     platform_keys = [p.strip() for p in platforms.split(",") if p.strip()]
     profile = build_user_profile(db, user.id)
 
-    # Get wish list
+    # Get wish list, filtered by platform if selected
     wish_query = (
         db.query(Movie)
         .join(UserMovie)
         .filter(UserMovie.user_id == user.id, UserMovie.status == "wish")
     )
 
-    # If platforms selected, filter to only movies available on those platforms
     if platform_keys:
         wish_query = (
             wish_query
@@ -71,14 +70,10 @@ async def recommend(
         genre_scores = [genre_w.get(g, 0) for g in genres]
         pref = sum(genre_scores) / max(len(genre_scores), 1) if genre_scores else 0
 
-        # Which selected platforms have this movie
-        movie_platform_keys = {
-            mp.provider_key for mp in movie.providers
-            if not platform_keys or mp.provider_key in platform_keys
-        }
         available_on = [
-            {"key": k, "name": PROVIDERS[k]["name"]}
-            for k in movie_platform_keys if k in PROVIDERS
+            {"key": mp.provider_key, "name": mp.provider_name}
+            for mp in movie.providers
+            if not platform_keys or mp.provider_key in platform_keys
         ]
 
         item = {
