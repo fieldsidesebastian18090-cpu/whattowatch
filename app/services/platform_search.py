@@ -1,9 +1,9 @@
 import asyncio
 import random
+import re
 from urllib.parse import quote
 
 import httpx
-from bs4 import BeautifulSoup
 
 from ..config import PROVIDERS
 
@@ -21,13 +21,17 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _normalize(title: str) -> str:
+    """Normalize title for fuzzy matching."""
+    # Remove common suffixes, punctuation, spaces
+    t = re.sub(r'[：:·\-—\s\(\)（）]', '', title)
+    return t.lower()
+
+
 async def _check_platform(
     client: httpx.AsyncClient, platform_key: str, title: str
 ) -> bool:
-    """Check if a movie title is available on a given platform by searching its site.
-
-    Returns True if the title appears in search results (best-effort heuristic).
-    """
+    """Check if a movie title is available on a given platform."""
     info = PROVIDERS.get(platform_key)
     if not info:
         return False
@@ -35,24 +39,26 @@ async def _check_platform(
     search_url = info["search_url"].format(q=quote(title))
 
     try:
-        resp = await client.get(search_url, headers=_headers(), timeout=15.0)
+        resp = await client.get(search_url, headers=_headers(), timeout=12.0)
         resp.raise_for_status()
         html = resp.text
 
-        # Heuristic: if the exact movie title appears in the response body,
-        # it's likely available on this platform.
-        # We do a case-insensitive check and also look for common result markers.
+        # Exact title match
         if title in html:
             return True
 
-        # Check for common "no results" patterns
-        no_result_markers = ["没有找到", "未找到", "暂无结果", "no results", "No Results"]
+        # Normalized fuzzy match: strip punctuation and check
+        norm_title = _normalize(title)
+        norm_html = _normalize(html)
+        if len(norm_title) >= 2 and norm_title in norm_html:
+            return True
+
+        # Check for "no results" markers
+        no_result_markers = ["没有找到", "未找到", "暂无结果", "no results", "No Results", "暂无相关"]
         for marker in no_result_markers:
             if marker in html:
                 return False
 
-        # If page is non-empty and no "no results" marker, be optimistic
-        # but require the title to actually appear
         return False
 
     except (httpx.HTTPError, httpx.TimeoutException):
@@ -62,24 +68,13 @@ async def _check_platform(
 async def search_platforms(
     title: str, platform_keys: list[str] | None = None
 ) -> list[dict]:
-    """Search multiple platforms for a movie title.
-
-    Args:
-        title: Movie title to search for
-        platform_keys: List of platform keys to search. If None, searches all.
-
-    Returns:
-        List of matched platforms: [{"key": "netflix", "name": "Netflix"}, ...]
-    """
+    """Search multiple platforms for a movie title concurrently."""
     if platform_keys is None:
         platform_keys = list(PROVIDERS.keys())
 
     matched = []
     async with httpx.AsyncClient(follow_redirects=True, trust_env=False) as client:
-        tasks = []
-        for key in platform_keys:
-            tasks.append(_check_platform(client, key, title))
-
+        tasks = [_check_platform(client, key, title) for key in platform_keys]
         results = await asyncio.gather(*tasks)
 
         for key, found in zip(platform_keys, results):
@@ -90,28 +85,3 @@ async def search_platforms(
                 })
 
     return matched
-
-
-async def batch_search_platforms(
-    movies: list[dict], platform_keys: list[str] | None = None, concurrency: int = 3
-) -> list[list[dict]]:
-    """Search platforms for multiple movies with concurrency control.
-
-    Args:
-        movies: List of dicts with at least a "title" key.
-        platform_keys: Platforms to search.
-        concurrency: Max concurrent movie searches.
-
-    Returns:
-        List of platform match lists, one per movie.
-    """
-    sem = asyncio.Semaphore(concurrency)
-
-    async def _search_one(m: dict) -> list[dict]:
-        async with sem:
-            result = await search_platforms(m["title"], platform_keys)
-            await asyncio.sleep(random.uniform(1.0, 2.0))
-            return result
-
-    tasks = [_search_one(m) for m in movies]
-    return await asyncio.gather(*tasks)

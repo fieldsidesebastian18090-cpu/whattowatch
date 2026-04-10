@@ -290,3 +290,50 @@ async def sync_douban_user(douban_id: str) -> list[DoubanMovie]:
         progress.phase = "done"
 
     return watched + wish
+
+
+async def discover_by_tags(
+    tags: list[str], exclude_ids: set[str], limit: int = 50
+) -> list[dict]:
+    """Discover movies from Douban by genre tags (JSON API, no anti-bot challenge).
+
+    Returns list of dicts: [{douban_id, title, rating, poster_url}]
+    """
+    discovered = {}  # douban_id -> dict, deduplicate
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=False) as client:
+        for tag in tags[:5]:  # Top 5 genres
+            try:
+                resp = await client.get(
+                    "https://movie.douban.com/j/search_subjects",
+                    params={
+                        "type": "movie",
+                        "tag": tag,
+                        "sort": "recommend",
+                        "page_limit": 20,
+                        "page_start": 0,
+                    },
+                    headers=_headers(),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                for item in data.get("subjects", []):
+                    did = item.get("id", "")
+                    if did and did not in exclude_ids and did not in discovered:
+                        rate = item.get("rate", "")
+                        discovered[did] = {
+                            "douban_id": did,
+                            "title": item.get("title", ""),
+                            "douban_rating": float(rate) if rate else None,
+                            "poster_url": item.get("cover", ""),
+                        }
+            except (httpx.HTTPError, ValueError):
+                continue
+
+            await asyncio.sleep(random.uniform(0.5, 1.0))
+
+            if len(discovered) >= limit:
+                break
+
+    return list(discovered.values())[:limit]

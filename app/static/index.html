@@ -137,69 +137,73 @@
     </div>
   </section>
 
-  <!-- Step 3: Recommendations -->
-  <section v-if="recommendations.length" class="mb-10">
+  <!-- Section A: Wish List Recommendations -->
+  <section v-if="wishItems.length" class="mb-10">
     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-      <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">3</span>
-      为你推荐
-      <span class="text-gray-500 text-sm font-normal ml-2">共 {{ recommendations.length }} 部</span>
+      <span class="w-7 h-7 rounded-full bg-gold flex items-center justify-center text-sm font-bold text-black">A</span>
+      想看清单
+      <span class="text-gray-500 text-sm font-normal ml-2">共 {{ wishItems.length }} 部可在你的平台观看</span>
     </h2>
-
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-      <div
-        v-for="(item, idx) in recommendations"
-        :key="item.movie_id"
-        @click="openDetail(item)"
-        class="movie-card bg-bg-card rounded-xl overflow-hidden"
-      >
-        <!-- Poster -->
+      <div v-for="(item, idx) in wishItems" :key="'w'+item.movie_id"
+           @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
         <div class="relative aspect-[2/3] bg-gray-800">
-          <img
-            v-if="item.poster_url"
-            :src="item.poster_url"
-            :alt="item.title"
-            class="w-full h-full object-cover"
-            loading="lazy"
-          />
+          <img v-if="item.poster_url" :src="item.poster_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy" />
           <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
-
-          <!-- Match badge -->
           <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
                :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">
             {{ item.match_pct }}% 匹配
           </div>
-
-          <!-- Source tag -->
-          <div v-if="item.source === '来自想看清单'" class="absolute top-2 left-2 bg-gold/90 text-black text-xs font-bold px-2 py-1 rounded">
-            想看
-          </div>
-
-          <!-- Rank -->
-          <div v-if="idx < 3" class="absolute bottom-2 left-2 text-5xl font-black text-white/20 leading-none">
-            {{ idx + 1 }}
-          </div>
+          <div class="absolute top-2 left-2 bg-gold/90 text-black text-xs font-bold px-2 py-1 rounded">想看</div>
+          <div v-if="idx < 3" class="absolute bottom-2 left-2 text-5xl font-black text-white/20 leading-none">{{ idx + 1 }}</div>
         </div>
-
-        <!-- Info -->
         <div class="p-3">
           <h3 class="font-semibold text-sm truncate mb-1" :title="item.title">{{ item.title }}</h3>
-          <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
+          <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
             <span v-if="item.year">{{ item.year }}</span>
             <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
           </div>
-          <!-- Director -->
-          <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">
-            {{ item.directors.slice(0, 2).join(' / ') }}
+          <div v-if="item.directors && item.directors.length" class="text-xs text-gray-500 truncate mb-1">{{ item.directors.slice(0, 2).join(' / ') }}</div>
+          <div class="flex flex-wrap gap-1 mb-1">
+            <span v-for="g in (item.genres||[]).slice(0, 3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
           </div>
-          <!-- Genres -->
-          <div class="flex flex-wrap gap-1 mb-2">
-            <span v-for="g in item.genres.slice(0, 3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
-          </div>
-          <!-- Platforms -->
           <div class="flex flex-wrap gap-1">
-            <span v-for="pl in item.platforms" :key="pl.name" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">
-              {{ pl.name }}
-            </span>
+            <span v-for="pl in item.platforms" :key="pl.name" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">{{ pl.name }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section B: Discovery Recommendations -->
+  <section v-if="discoverItems.length" class="mb-10">
+    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+      <span class="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-sm font-bold">B</span>
+      猜你喜欢
+      <span class="text-gray-500 text-sm font-normal ml-2">基于你的观影偏好发现 {{ discoverItems.length }} 部</span>
+    </h2>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div v-for="(item, idx) in discoverItems" :key="'d'+item.movie_id"
+           @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
+        <div class="relative aspect-[2/3] bg-gray-800">
+          <img v-if="item.poster_url" :src="item.poster_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy" />
+          <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
+          <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
+               :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">
+            {{ item.match_pct }}% 匹配
+          </div>
+        </div>
+        <div class="p-3">
+          <h3 class="font-semibold text-sm truncate mb-1" :title="item.title">{{ item.title }}</h3>
+          <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
+            <span v-if="item.year">{{ item.year }}</span>
+            <span v-if="item.douban_rating" class="text-gold font-semibold">{{ item.douban_rating.toFixed(1) }}</span>
+          </div>
+          <div class="flex flex-wrap gap-1 mb-1">
+            <span v-for="g in (item.genres||[]).slice(0, 3)" :key="g" class="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{{ g }}</span>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span v-for="pl in item.platforms" :key="pl.name" class="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">{{ pl.name }}</span>
           </div>
         </div>
       </div>
@@ -207,7 +211,7 @@
   </section>
 
   <!-- Empty state -->
-  <div v-if="recsLoaded && !recommendations.length" class="text-center py-16 text-gray-500">
+  <div v-if="recsLoaded && !wishItems.length && !discoverItems.length" class="text-center py-16 text-gray-500">
     <p class="text-xl mb-2">没有找到推荐内容</p>
     <p class="text-sm">试试选择更多平台，或等待同步完成后重试</p>
   </div>
@@ -308,7 +312,8 @@ createApp({
     const profile = ref(null)
     const platforms = ref([])
     const selectedPlatforms = ref([])
-    const recommendations = ref([])
+    const wishItems = ref([])
+    const discoverItems = ref([])
     const loadingRecs = ref(false)
     const recsLoaded = ref(false)
     const detailMovie = ref(null)
@@ -351,7 +356,8 @@ createApp({
       syncError.value = ''
       syncPhase.value = 'idle'
       profile.value = null
-      recommendations.value = []
+      wishItems.value = []
+      discoverItems.value = []
       recsLoaded.value = false
 
       try {
@@ -413,7 +419,8 @@ createApp({
         })
         const resp = await fetch(`/api/recommend/${doubanId.value}?${params}`)
         const data = await resp.json()
-        recommendations.value = data.items || []
+        wishItems.value = data.wish_items || []
+        discoverItems.value = data.discover_items || []
         recsLoaded.value = true
       } catch (e) {
         console.error(e)
@@ -429,7 +436,7 @@ createApp({
     return {
       doubanId, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
       profile, platforms, selectedPlatforms, platformIcons,
-      recommendations, loadingRecs, recsLoaded,
+      wishItems, discoverItems, loadingRecs, recsLoaded,
       detailMovie,
       startSync, togglePlatform, getRecommendations, openDetail
     }
