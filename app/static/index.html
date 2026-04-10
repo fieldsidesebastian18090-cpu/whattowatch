@@ -140,7 +140,7 @@
       <div v-if="currentList.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <div v-for="item in currentList" :key="item.movie_id" @click="openDetail(item)" class="movie-card bg-bg-card rounded-xl overflow-hidden">
           <div class="relative aspect-[2/3] bg-gray-800">
-            <img v-if="item.poster_url" :src="item.poster_url" class="w-full h-full object-cover" loading="lazy" />
+            <img v-if="item.poster_url" :src="imgProxy(item.poster_url)" class="w-full h-full object-cover" loading="lazy" />
             <div v-else class="w-full h-full flex items-center justify-center text-gray-600 text-4xl">?</div>
             <div class="absolute top-2 right-2 bg-black/80 rounded-full px-2 py-1 text-xs font-bold"
               :class="item.match_pct >= 70 ? 'text-green-400' : item.match_pct >= 40 ? 'text-yellow-400' : 'text-gray-400'">{{ item.match_pct }}%</div>
@@ -168,7 +168,7 @@
     <div class="bg-bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
       <div class="flex flex-col sm:flex-row gap-6 p-6">
         <div class="sm:w-48 flex-shrink-0">
-          <img v-if="detailMovie.poster_url" :src="detailMovie.poster_url" class="w-full rounded-lg shadow-lg" />
+          <img v-if="detailMovie.poster_url" :src="imgProxy(detailMovie.poster_url)" class="w-full rounded-lg shadow-lg" />
           <div v-else class="w-full aspect-[2/3] bg-gray-800 rounded-lg flex items-center justify-center text-gray-600 text-6xl">?</div>
         </div>
         <div class="flex-1 min-w-0">
@@ -236,6 +236,11 @@ createApp({
     const activeTab = ref('movie')
 
     const platformIcons = { tencent: '📺', iqiyi: '🎬', youku: '🎥', mango: '🥭', netflix: '🔴', disney: '🏰', max: '🟣' }
+
+    function imgProxy(url) {
+      if (!url) return ''
+      return '/api/img?url=' + encodeURIComponent(url)
+    }
 
     const currentList = computed(() => {
       if (activeTab.value === 'movie') return movieWish.value
@@ -307,7 +312,7 @@ createApp({
       doubanId, doubanCookie, syncing, syncPhase, syncProgress, syncError, syncStatusText, progressPct,
       profile, platforms, selectedPlatforms, platformIcons, activeTab, currentList,
       movieWish, tvWish, bookWish, loadingRecs, recsLoaded, detailMovie,
-      startSync, togglePlatform, getRecommendations, openDetail
+      startSync, togglePlatform, getRecommendations, openDetail, imgProxy
     }
   }
 }).mount('#app')
